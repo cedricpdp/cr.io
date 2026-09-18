@@ -1,0 +1,54 @@
+name: Deploy production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: node --check app.js
+      - run: docker build --tag crio:production .
+      - name: Smoke-test image
+        run: |
+          docker run --detach --name crio-prod-test --publish 18000:8000 crio:production
+          for attempt in {1..20}; do
+            curl --fail --silent http://127.0.0.1:18000/health && break
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:18000/ | grep --quiet "cr.io"
+
+  deploy:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Install Koyeb CLI
+        run: curl -fsSL https://raw.githubusercontent.com/koyeb/koyeb-cli/master/install.sh | sh
+      - name: Redeploy service
+        env:
+          KOYEB_TOKEN: ${{ secrets.KOYEB_TOKEN }}
+          KOYEB_APP: ${{ vars.KOYEB_APP }}
+          KOYEB_SERVICE: ${{ vars.KOYEB_SERVICE }}
+        run: koyeb services redeploy "$KOYEB_SERVICE" --app "$KOYEB_APP" --wait --wait-timeout 10m
+      - name: Verify production health
+        env:
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+        run: |
+          for attempt in {1..24}; do
+            if curl --fail --silent "$PRODUCTION_URL/health" | grep --quiet '"status":"ok"'; then
+              exit 0
+            fi
+            sleep 5
+          done
+          exit 1

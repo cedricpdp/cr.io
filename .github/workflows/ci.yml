@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify required files
+        run: test -s index.html && test -s styles.css && test -s app.js && test -s nginx.conf
+      - name: Check JavaScript syntax
+        run: node --check app.js
+      - name: Build production image
+        run: docker build --tag crio:ci .
+      - name: Smoke-test production image
+        run: |
+          docker run --detach --name crio-ci --publish 18000:8000 crio:ci
+          for attempt in {1..20}; do
+            curl --fail --silent http://127.0.0.1:18000/health && break
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:18000/ | grep --quiet "cr.io"
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs crio-ci || true
