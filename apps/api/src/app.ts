@@ -6,15 +6,17 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { createDatabase, type Database } from "../../../packages/db/src/index.js";
 import { DrizzleAuthRepository } from "./auth/repository.js";
-import { authRoutes, SESSION_COOKIE } from "./auth/routes.js";
+import { authRoutes } from "./auth/routes.js";
 import { AuthService } from "./auth/service.js";
-import { createDemoStorage } from "./demo-storage.js";
+import { DrizzleStorageRepository, type StorageRepository } from "./storage/repository.js";
+import { storageRoutes } from "./storage/routes.js";
 
 export interface AppOptions {
   logger?: boolean;
   databaseUrl?: string;
   serveWeb?: boolean;
   authService?: AuthService;
+  storageRepository?: StorageRepository;
 }
 
 export async function buildApp(options: AppOptions = {}) {
@@ -30,25 +32,17 @@ export async function buildApp(options: AppOptions = {}) {
   await app.register(fastifyRateLimit, { global: false });
 
   const authService = options.authService ?? (database ? new AuthService(new DrizzleAuthRepository(database.db)) : undefined);
+  const storageRepository = options.storageRepository ?? (database ? new DrizzleStorageRepository(database.db) : undefined);
   await app.register(authRoutes, { prefix: "/api/auth", service: authService });
+  await app.register(storageRoutes, { prefix: "/api", authService, repository: storageRepository });
 
   app.get("/api/health", async (_request, reply) => {
     if (database) await database.ping();
     return reply.send({
       status: "ok",
       database: database ? "ok" : "not_configured",
-      version: process.env.npm_package_version ?? "0.3.0"
+      version: process.env.npm_package_version ?? "0.4.0"
     });
-  });
-
-  app.get("/api/storage", async (request, reply) => {
-    if (authService) {
-      const token = request.cookies[SESSION_COOKIE];
-      if (!token || !await authService.authenticate(token)) {
-        return reply.code(401).send({ error: "unauthorized", message: "Connexion requise." });
-      }
-    }
-    return createDemoStorage();
   });
 
   const webRoot = resolve(process.cwd(), "dist/web");

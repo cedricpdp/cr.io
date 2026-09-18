@@ -40,4 +40,4 @@ pnpm db:migrate
 
 ## État
 
-Version `0.3.0` : fondation full-stack et authentification par e-mail/mot de passe avec Argon2id, sessions serveur et création automatique du premier workspace. GitHub Pages reste la vitrine statique avec données de démonstration ; le Dockerfile est la cible de déploiement full-stack. Voir [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+Version `0.4.0` : CRUD complet des freezers, racks et boxes, navigation adaptative sur une hiérarchie vide ou multiple, et isolation systématique des opérations par workspace. GitHub Pages reste la vitrine statique avec données de démonstration ; le Dockerfile est la cible de déploiement full-stack. Voir [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) et [`docs/API.md`](docs/API.md).

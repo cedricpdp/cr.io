@@ -64,8 +64,11 @@ h2 { font-size: 1.45rem; letter-spacing: -.035em; margin-bottom: 0; }
 .metric strong { display: block; font-size: 1.35rem; letter-spacing: -.04em; }
 .metric span { color: var(--text-muted); font-size: .82rem; }
 .box-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.box-card-wrap { min-width: 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); overflow: hidden; transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease; }
+.box-card-wrap:hover { transform: translateY(-2px); border-color: var(--accent); box-shadow: var(--shadow); }
 .box-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; background: var(--surface); text-align: left; cursor: pointer; transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease; }
-.box-card:hover { transform: translateY(-2px); border-color: var(--accent); box-shadow: var(--shadow); }
+.box-card-wrap .box-card { width: 100%; border: 0; border-radius: 0; }
+.box-card-wrap .box-card:hover { background: var(--surface-hover); }
 .box-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
 .box-card h3 { margin: 0 0 3px; font-size: 1.02rem; }
 .box-card small { color: var(--text-muted); }
@@ -135,6 +138,21 @@ h2 { font-size: 1.45rem; letter-spacing: -.035em; margin-bottom: 0; }
 .account-summary span, .account-summary small { color: var(--text-muted); margin-top: 3px; }
 .account-summary span { font-size: .82rem; }
 .account-summary small { font-size: .72rem; }
+.page-actions { display: flex; justify-content: flex-end; margin: -8px 0 20px; }
+.primary-button.compact { width: auto; min-height: 40px; padding-inline: 15px; }
+.entity-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.entity-card { min-width: 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); overflow: hidden; }
+.entity-open { width: 100%; min-height: 150px; padding: 21px; border: 0; background: transparent; text-align: left; cursor: pointer; }
+.entity-open:hover { background: var(--surface-hover); }
+.entity-open h2 { margin-bottom: 8px; }
+.entity-open p { margin: 0; color: var(--text-muted); }
+.card-actions { display: flex; gap: 6px; justify-content: flex-end; padding: 10px 13px; border-top: 1px solid var(--border); background: var(--surface); }
+.card-actions button { border: 0; border-radius: 8px; padding: 7px 9px; background: transparent; color: var(--text-muted); cursor: pointer; font-size: .74rem; font-weight: 700; }
+.card-actions button:hover { background: var(--surface-hover); color: var(--text); }
+.card-actions .danger-link:hover { color: var(--danger); }
+.empty-state { padding: 50px 24px; border: 1px dashed var(--border); border-radius: var(--radius); background: color-mix(in srgb, var(--surface) 70%, transparent); text-align: center; }
+.empty-state p { margin: 7px 0 0; color: var(--text-muted); }
+.form-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
 @media (max-width: 760px) {
   .app-header { height: 62px; padding-inline: 16px; }
@@ -145,6 +163,7 @@ h2 { font-size: 1.45rem; letter-spacing: -.035em; margin-bottom: 0; }
   .metric { padding: 13px 12px; }
   .metric strong { font-size: 1.1rem; }
   .box-grid { grid-template-columns: 1fr; }
+  .entity-grid { grid-template-columns: 1fr; }
   .sample-panel { flex-direction: column; }
   .sample-panel dl { grid-template-columns: 1fr 1fr; gap: 14px; }
   .auth-page { min-height: calc(100vh - 62px); width: min(100% - 28px, 520px); grid-template-columns: 1fr; gap: 30px; padding: 42px 0; }

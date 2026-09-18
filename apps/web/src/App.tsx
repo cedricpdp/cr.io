@@ -17,6 +17,15 @@ type ThemePreference = "system" | "light" | "dark";
 type AppMode = "loading" | "demo" | "guest" | "authenticated";
 type Location = { freezer: Freezer; rack: Rack; box?: StorageBox };
 type SearchResult = Required<Location> & { sample: Sample };
+type View =
+  | { level: "freezers" }
+  | { level: "racks"; freezerId: string }
+  | { level: "boxes"; freezerId: string; rackId: string }
+  | { level: "box"; freezerId: string; rackId: string; boxId: string };
+type EditorState =
+  | { kind: "freezer"; entity?: Freezer }
+  | { kind: "rack"; freezer: Freezer; entity?: Rack }
+  | { kind: "box"; freezer: Freezer; rack: Rack; entity?: StorageBox };
 
 function getThemePreference(): ThemePreference {
   const value = localStorage.getItem("crio-theme");
@@ -31,6 +40,13 @@ function applyTheme(preference: ThemePreference) {
 
 function positionLabel(position: number, columns = 8) {
   return `${String.fromCharCode(65 + Math.floor((position - 1) / columns))}${((position - 1) % columns) + 1}`;
+}
+
+function landingView(snapshot: StorageSnapshot): View {
+  const landing = resolveLandingLevel(snapshot);
+  if (landing.level === "freezers") return { level: "freezers" };
+  if (landing.level === "racks") return { level: "racks", freezerId: landing.freezer.id };
+  return { level: "boxes", freezerId: landing.freezer.id, rackId: landing.rack.id };
 }
 
 function AuthView({ onAuthenticated }: { onAuthenticated: (session: AuthSession) => Promise<void> }) {
@@ -97,26 +113,62 @@ function AuthView({ onAuthenticated }: { onAuthenticated: (session: AuthSession)
   </section>;
 }
 
-function BoxCard({ box, onOpen }: { box: StorageBox; onOpen: () => void }) {
+function FreezersView({ snapshot, editable, onCreate, onOpen, onEdit, onDelete }: { snapshot: StorageSnapshot; editable: boolean; onCreate: () => void; onOpen: (freezer: Freezer) => void; onEdit: (freezer: Freezer) => void; onDelete: (freezer: Freezer) => void }) {
+  return <section className="page">
+    <div className="page-head">
+      <div><span className="eyebrow">{snapshot.workspace.name}</span><h1>Vos freezers.</h1><p className="subtitle">Choisissez un freezer pour parcourir son contenu.</p></div>
+      <div className="context"><i className="context-dot" />{snapshot.freezers.length} freezer{snapshot.freezers.length > 1 ? "s" : ""}</div>
+    </div>
+    {editable && <div className="page-actions"><button className="primary-button compact" type="button" onClick={onCreate}>Ajouter un freezer</button></div>}
+    {snapshot.freezers.length ? <div className="entity-grid">{snapshot.freezers.map((freezer) => {
+      const boxCount = freezer.racks.reduce((sum, rack) => sum + rack.boxes.length, 0);
+      return <article className="entity-card" key={freezer.id}>
+        <button className="entity-open" type="button" onClick={() => onOpen(freezer)}><span className="eyebrow">{freezer.temperatureCelsius} °C</span><h2>{freezer.name}</h2><p>{freezer.racks.length} racks · {boxCount} boxes</p></button>
+        {editable && <div className="card-actions"><button type="button" onClick={() => onEdit(freezer)}>Modifier</button><button className="danger-link" type="button" onClick={() => onDelete(freezer)}>Supprimer</button></div>}
+      </article>;
+    })}</div> : <div className="empty-state"><h2>Votre espace est prêt</h2><p>Commencez par ajouter votre premier freezer.</p></div>}
+  </section>;
+}
+
+function RacksView({ snapshot, freezer, editable, onBack, onCreate, onOpen, onEdit, onDelete }: { snapshot: StorageSnapshot; freezer: Freezer; editable: boolean; onBack: () => void; onCreate: () => void; onOpen: (rack: Rack) => void; onEdit: (rack: Rack) => void; onDelete: (rack: Rack) => void }) {
+  return <section className="page">
+    <button className="back" type="button" onClick={onBack}>‹ Freezers</button>
+    <div className="page-head">
+      <div><span className="eyebrow">{snapshot.workspace.name}</span><h1>{freezer.name}</h1><p className="subtitle">Sélectionnez le rack que vous souhaitez consulter.</p></div>
+      <div className="context">{freezer.temperatureCelsius} °C · {freezer.racks.length} racks</div>
+    </div>
+    {editable && <div className="page-actions"><button className="primary-button compact" type="button" onClick={onCreate}>Ajouter un rack</button></div>}
+    {freezer.racks.length ? <div className="entity-grid">{freezer.racks.map((rack) => <article className="entity-card" key={rack.id}>
+      <button className="entity-open" type="button" onClick={() => onOpen(rack)}><span className="eyebrow">Rack</span><h2>{rack.name}</h2><p>{rack.boxes.length} box{rack.boxes.length > 1 ? "es" : ""}</p></button>
+      {editable && <div className="card-actions"><button type="button" onClick={() => onEdit(rack)}>Modifier</button><button className="danger-link" type="button" onClick={() => onDelete(rack)}>Supprimer</button></div>}
+    </article>)}</div> : <div className="empty-state"><h2>Aucun rack</h2><p>Ajoutez le premier rack de ce freezer.</p></div>}
+  </section>;
+}
+
+function BoxCard({ box, onOpen, onEdit, onDelete, editable }: { box: StorageBox; onOpen: () => void; onEdit: () => void; onDelete: () => void; editable: boolean }) {
   const samplePositions = new Set(box.samples.map((sample) => sample.position));
   const capacity = box.rows * box.columns;
 
-  return <button className="box-card" type="button" onClick={onOpen}>
-    <div className="box-card-head">
-      <div><h3>{box.name}</h3><small>{box.rows} × {box.columns} positions</small></div>
-      <span className="pill">{box.samples.length}/{capacity}</span>
-    </div>
-    <div className="mini-grid" style={{ gridTemplateColumns: `repeat(${box.columns}, 1fr)` }} aria-hidden="true">
-      {Array.from({ length: capacity }, (_, index) => <span key={index} className={`mini-cell ${samplePositions.has(index + 1) ? "occupied" : ""}`} />)}
-    </div>
-  </button>;
+  return <div className="box-card-wrap">
+    <button className="box-card" type="button" onClick={onOpen}>
+      <div className="box-card-head">
+        <div><h3>{box.name}</h3><small>{box.rows} × {box.columns} positions</small></div>
+        <span className="pill">{box.samples.length}/{capacity}</span>
+      </div>
+      <div className="mini-grid" style={{ gridTemplateColumns: `repeat(${box.columns}, 1fr)` }} aria-hidden="true">
+        {Array.from({ length: capacity }, (_, index) => <span key={index} className={`mini-cell ${samplePositions.has(index + 1) ? "occupied" : ""}`} />)}
+      </div>
+    </button>
+    {editable && <div className="card-actions"><button type="button" onClick={onEdit}>Modifier</button><button className="danger-link" type="button" onClick={onDelete}>Supprimer</button></div>}
+  </div>;
 }
 
-function BoxesView({ snapshot, freezer, rack, onOpenBox }: { snapshot: StorageSnapshot; freezer: Freezer; rack: Rack; onOpenBox: (box: StorageBox) => void }) {
+function BoxesView({ snapshot, freezer, rack, editable, onBack, onCreate, onOpenBox, onEditBox, onDeleteBox }: { snapshot: StorageSnapshot; freezer: Freezer; rack: Rack; editable: boolean; onBack: () => void; onCreate: () => void; onOpenBox: (box: StorageBox) => void; onEditBox: (box: StorageBox) => void; onDeleteBox: (box: StorageBox) => void }) {
   const total = rack.boxes.reduce((sum, box) => sum + box.samples.length, 0);
   const capacity = rack.boxes.reduce((sum, box) => sum + box.rows * box.columns, 0);
 
   return <section className="page">
+    <button className="back" type="button" onClick={onBack}>‹ {freezer.name}</button>
     <div className="page-head">
       <div>
         <span className="eyebrow">{snapshot.workspace.name}</span>
@@ -125,12 +177,13 @@ function BoxesView({ snapshot, freezer, rack, onOpenBox }: { snapshot: StorageSn
       </div>
       <div className="context"><i className="context-dot" />{freezer.name} <span>·</span> {rack.name}</div>
     </div>
+    {editable && <div className="page-actions"><button className="primary-button compact" type="button" onClick={onCreate}>Ajouter une box</button></div>}
     <div className="metrics">
       <div className="metric"><strong>{rack.boxes.length}</strong><span>boxes</span></div>
       <div className="metric"><strong>{total}</strong><span>échantillons</span></div>
       <div className="metric"><strong>{capacity - total}</strong><span>places libres</span></div>
     </div>
-    <div className="box-grid">{rack.boxes.map((box) => <BoxCard key={box.id} box={box} onOpen={() => onOpenBox(box)} />)}</div>
+    {rack.boxes.length ? <div className="box-grid">{rack.boxes.map((box) => <BoxCard key={box.id} box={box} editable={editable} onOpen={() => onOpenBox(box)} onEdit={() => onEditBox(box)} onDelete={() => onDeleteBox(box)} />)}</div> : <div className="empty-state"><h2>Aucune box</h2><p>Ajoutez la première box de ce rack.</p></div>}
   </section>;
 }
 
@@ -187,11 +240,71 @@ function BoxView({ location, selectedPosition, onBack, onSelect }: { location: R
   </section>;
 }
 
+function EntityEditor({ state, onClose, onSaved }: { state: EditorState; onClose: () => void; onSaved: () => Promise<void> }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const entity = state.entity;
+
+  useEffect(() => { dialog.current?.showModal(); }, []);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitting(true);
+    setError("");
+    const values = new FormData(event.currentTarget);
+    const payload = state.kind === "freezer"
+      ? { name: values.get("name"), temperatureCelsius: Number(values.get("temperatureCelsius")) }
+      : state.kind === "rack"
+        ? { name: values.get("name") }
+        : { name: values.get("name"), rows: Number(values.get("rows")), columns: Number(values.get("columns")) };
+    const endpoint = state.kind === "freezer"
+      ? entity ? `/api/freezers/${entity.id}` : "/api/freezers"
+      : state.kind === "rack"
+        ? entity ? `/api/racks/${entity.id}` : `/api/freezers/${state.freezer.id}/racks`
+        : entity ? `/api/boxes/${entity.id}` : `/api/racks/${state.rack.id}/boxes`;
+
+    try {
+      const response = await fetch(endpoint, {
+        method: entity ? "PATCH" : "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) {
+        const body: unknown = await response.json();
+        const message = typeof body === "object" && body !== null && "message" in body ? String(body.message) : "Enregistrement impossible.";
+        throw new Error(message);
+      }
+      dialog.current?.close();
+      await onSaved();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Une erreur est survenue.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const title = `${entity ? "Modifier" : "Ajouter"} ${state.kind === "freezer" ? "un freezer" : state.kind === "rack" ? "un rack" : "une box"}`;
+  return <dialog ref={dialog} className="dialog entity-dialog" onClose={onClose}>
+    <div className="dialog-shell">
+      <div className="dialog-head"><div><span className="eyebrow">Organisation du stockage</span><h2>{title}</h2></div><button className="icon-button" type="button" onClick={() => dialog.current?.close()} aria-label="Fermer">×</button></div>
+      <form className="auth-form" onSubmit={(event) => void submit(event)}>
+        <label>Nom<input name="name" required maxLength={120} defaultValue={entity?.name ?? ""} autoFocus /></label>
+        {state.kind === "freezer" && <label>Température (°C)<input name="temperatureCelsius" type="number" min={-196} max={30} required defaultValue={state.entity?.temperatureCelsius ?? -80} /></label>}
+        {state.kind === "box" && <div className="form-columns"><label>Lignes<input name="rows" type="number" min={1} max={32} required defaultValue={state.entity?.rows ?? 8} /></label><label>Colonnes<input name="columns" type="number" min={1} max={32} required defaultValue={state.entity?.columns ?? 8} /></label></div>}
+        {error && <div className="form-error" role="alert">{error}</div>}
+        <button className="primary-button" type="submit" disabled={submitting}>{submitting ? "Enregistrement…" : "Enregistrer"}</button>
+      </form>
+    </div>
+  </dialog>;
+}
+
 export function App() {
   const [mode, setMode] = useState<AppMode>("loading");
   const [authSession, setAuthSession] = useState<AuthSession>();
   const [snapshot, setSnapshot] = useState<StorageSnapshot>();
-  const [location, setLocation] = useState<Location>();
+  const [view, setView] = useState<View>({ level: "freezers" });
+  const [editor, setEditor] = useState<EditorState>();
   const [selectedPosition, setSelectedPosition] = useState<number | null>(null);
   const [query, setQuery] = useState("");
   const [theme, setTheme] = useState<ThemePreference>(getThemePreference);
@@ -200,11 +313,8 @@ export function App() {
   const searchInput = useRef<HTMLInputElement>(null);
 
   function showStorage(data: StorageSnapshot) {
-    const landing = resolveLandingLevel(data);
     setSnapshot(data);
-    if (landing.level === "boxes") setLocation({ freezer: landing.freezer, rack: landing.rack });
-    else if (landing.level === "racks" && landing.freezer.racks[0]) setLocation({ freezer: landing.freezer, rack: landing.freezer.racks[0] });
-    else if (data.freezers[0]?.racks[0]) setLocation({ freezer: data.freezers[0], rack: data.freezers[0].racks[0] });
+    setView(landingView(data));
   }
 
   async function loadStorage() {
@@ -270,16 +380,26 @@ export function App() {
   }
 
   function openResult(result: SearchResult) {
-    setLocation({ freezer: result.freezer, rack: result.rack, box: result.box });
+    setView({ level: "box", freezerId: result.freezer.id, rackId: result.rack.id, boxId: result.box.id });
     setSelectedPosition(result.sample.position);
     searchDialog.current?.close();
   }
 
   function goHome() {
     if (!snapshot) return;
-    const landing = resolveLandingLevel(snapshot);
-    if (landing.level === "boxes") setLocation({ freezer: landing.freezer, rack: landing.rack });
+    setView(landingView(snapshot));
     setSelectedPosition(null);
+  }
+
+  async function removeEntity(kind: "freezers" | "racks" | "boxes", id: string, name: string) {
+    if (!window.confirm(`Supprimer « ${name} » et tout son contenu ?`)) return;
+    const response = await fetch(`/api/${kind}/${id}`, { method: "DELETE" });
+    if (!response.ok) {
+      const body: unknown = await response.json();
+      window.alert(typeof body === "object" && body !== null && "message" in body ? String(body.message) : "Suppression impossible.");
+      return;
+    }
+    await loadStorage();
   }
 
   async function handleAuthenticated(session: AuthSession) {
@@ -295,12 +415,16 @@ export function App() {
       settingsDialog.current?.close();
       setAuthSession(undefined);
       setSnapshot(undefined);
-      setLocation(undefined);
+      setView({ level: "freezers" });
       setMode("guest");
     }
   }
 
   const initials = authSession?.user.displayName.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toLocaleUpperCase("fr") || "CL";
+  const editable = mode === "authenticated" && (authSession?.workspace.role === "owner" || authSession?.workspace.role === "admin");
+  const currentFreezer = view.level === "freezers" ? undefined : snapshot?.freezers.find((freezer) => freezer.id === view.freezerId);
+  const currentRack = view.level === "freezers" || view.level === "racks" ? undefined : currentFreezer?.racks.find((rack) => rack.id === view.rackId);
+  const currentBox = view.level === "box" ? currentRack?.boxes.find((box) => box.id === view.boxId) : undefined;
 
   return <>
     <header className="app-header">
@@ -313,10 +437,47 @@ export function App() {
     </header>
 
     <main id="app" tabIndex={-1}>
-      {mode === "guest" ? <AuthView onAuthenticated={handleAuthenticated} /> : !snapshot || !location ? <section className="page"><span className="eyebrow">Connexion</span><h1>Chargement du stockage…</h1></section> : location.box
-        ? <BoxView location={location as Required<Location>} selectedPosition={selectedPosition} onBack={() => { setLocation({ freezer: location.freezer, rack: location.rack }); setSelectedPosition(null); }} onSelect={setSelectedPosition} />
-        : <BoxesView snapshot={snapshot} freezer={location.freezer} rack={location.rack} onOpenBox={(box) => { setLocation({ ...location, box }); setSelectedPosition(null); }} />}
+      {mode === "guest" ? <AuthView onAuthenticated={handleAuthenticated} />
+        : !snapshot ? <section className="page"><span className="eyebrow">Connexion</span><h1>Chargement du stockage…</h1></section>
+          : view.level === "freezers" ? <FreezersView
+              snapshot={snapshot}
+              editable={editable}
+              onCreate={() => setEditor({ kind: "freezer" })}
+              onOpen={(freezer) => setView(freezer.racks.length === 1 ? { level: "boxes", freezerId: freezer.id, rackId: freezer.racks[0]!.id } : { level: "racks", freezerId: freezer.id })}
+              onEdit={(freezer) => setEditor({ kind: "freezer", entity: freezer })}
+              onDelete={(freezer) => void removeEntity("freezers", freezer.id, freezer.name)}
+            />
+            : view.level === "racks" && currentFreezer ? <RacksView
+                snapshot={snapshot}
+                freezer={currentFreezer}
+                editable={editable}
+                onBack={() => setView({ level: "freezers" })}
+                onCreate={() => setEditor({ kind: "rack", freezer: currentFreezer })}
+                onOpen={(rack) => setView({ level: "boxes", freezerId: currentFreezer.id, rackId: rack.id })}
+                onEdit={(rack) => setEditor({ kind: "rack", freezer: currentFreezer, entity: rack })}
+                onDelete={(rack) => void removeEntity("racks", rack.id, rack.name)}
+              />
+              : view.level === "boxes" && currentFreezer && currentRack ? <BoxesView
+                  snapshot={snapshot}
+                  freezer={currentFreezer}
+                  rack={currentRack}
+                  editable={editable}
+                  onBack={() => setView({ level: "racks", freezerId: currentFreezer.id })}
+                  onCreate={() => setEditor({ kind: "box", freezer: currentFreezer, rack: currentRack })}
+                  onOpenBox={(box) => { setView({ level: "box", freezerId: currentFreezer.id, rackId: currentRack.id, boxId: box.id }); setSelectedPosition(null); }}
+                  onEditBox={(box) => setEditor({ kind: "box", freezer: currentFreezer, rack: currentRack, entity: box })}
+                  onDeleteBox={(box) => void removeEntity("boxes", box.id, box.name)}
+                />
+                : view.level === "box" && currentFreezer && currentRack && currentBox ? <BoxView
+                    location={{ freezer: currentFreezer, rack: currentRack, box: currentBox }}
+                    selectedPosition={selectedPosition}
+                    onBack={() => { setView({ level: "boxes", freezerId: currentFreezer.id, rackId: currentRack.id }); setSelectedPosition(null); }}
+                    onSelect={setSelectedPosition}
+                  />
+                  : <section className="page"><span className="eyebrow">Navigation</span><h1>Élément introuvable.</h1><button className="primary-button compact" type="button" onClick={goHome}>Revenir à l’accueil</button></section>}
     </main>
+
+    {editor && <EntityEditor state={editor} onClose={() => setEditor(undefined)} onSaved={async () => { setEditor(undefined); await loadStorage(); }} />}
 
     <dialog ref={searchDialog} className="dialog search-dialog">
       <div className="dialog-shell">
@@ -332,7 +493,7 @@ export function App() {
         {authSession && <div className="account-summary"><strong>{authSession.user.displayName}</strong><span>{authSession.user.email}</span><small>{authSession.workspace.name} · {authSession.workspace.role}</small></div>}
         <fieldset className="theme-options"><legend>Thème</legend>{(["system", "light", "dark"] as const).map((value) => <label key={value}><input type="radio" name="theme" value={value} checked={theme === value} onChange={() => setTheme(value)} /><span>{{ system: "Système", light: "Clair", dark: "Sombre" }[value]}</span></label>)}</fieldset>
         {authSession && <button className="secondary-button" type="button" onClick={() => void logout()}>Se déconnecter</button>}
-        <div className="about"><strong>cr.io</strong><span>Version 0.3.0 · authentification</span></div>
+        <div className="about"><strong>cr.io</strong><span>Version 0.4.0 · stockage</span></div>
       </div>
     </dialog>
   </>;

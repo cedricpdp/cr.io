@@ -43,12 +43,58 @@ export const healthSchema = z.object({
   version: z.string()
 });
 
+const entityNameSchema = z.string().trim().min(1).max(120);
+const positionSchema = z.number().int().positive();
+
+export const createFreezerSchema = z.object({
+  name: entityNameSchema,
+  temperatureCelsius: z.number().int().min(-196).max(30)
+});
+
+export const updateFreezerSchema = createFreezerSchema.partial().refine((value) => Object.keys(value).length > 0, "Au moins un champ est requis.");
+
+export const createRackSchema = z.object({
+  name: entityNameSchema,
+  position: positionSchema.optional()
+});
+
+export const updateRackSchema = z.object({
+  name: entityNameSchema.optional(),
+  position: positionSchema.optional()
+}).refine((value) => Object.keys(value).length > 0, "Au moins un champ est requis.");
+
+export const createBoxSchema = z.object({
+  name: entityNameSchema,
+  position: positionSchema.optional(),
+  rows: z.number().int().min(1).max(32).default(8),
+  columns: z.number().int().min(1).max(32).default(8)
+});
+
+export const updateBoxSchema = z.object({
+  name: entityNameSchema.optional(),
+  position: positionSchema.optional(),
+  rows: z.number().int().min(1).max(32).optional(),
+  columns: z.number().int().min(1).max(32).optional()
+}).refine((value) => Object.keys(value).length > 0, "Au moins un champ est requis.");
+
+export const entityIdParamsSchema = z.object({ id: z.uuid() });
+export const freezerIdParamsSchema = z.object({ freezerId: z.uuid() });
+export const rackIdParamsSchema = z.object({ rackId: z.uuid() });
+
+export const mutationResultSchema = z.object({ id: z.uuid() });
+
 export type Sample = z.infer<typeof sampleSchema>;
 export type StorageBox = z.infer<typeof boxSchema>;
 export type Rack = z.infer<typeof rackSchema>;
 export type Freezer = z.infer<typeof freezerSchema>;
 export type StorageSnapshot = z.infer<typeof storageSnapshotSchema>;
 export type Health = z.infer<typeof healthSchema>;
+export type CreateFreezer = z.infer<typeof createFreezerSchema>;
+export type UpdateFreezer = z.infer<typeof updateFreezerSchema>;
+export type CreateRack = z.infer<typeof createRackSchema>;
+export type UpdateRack = z.infer<typeof updateRackSchema>;
+export type CreateBox = z.infer<typeof createBoxSchema>;
+export type UpdateBox = z.infer<typeof updateBoxSchema>;
 
 export type LandingLevel =
   | { level: "freezers" }
