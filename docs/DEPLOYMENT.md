@@ -1,21 +1,26 @@
 # Déployer cr.io
 
-La version `0.1.0` est une application statique servie par Nginx. Elle ne nécessite ni Node.js à l'exécution, ni base de données.
+## Vitrine GitHub Pages
 
-## Configuration initiale
+Le workflow `deploy.yml` compile React et publie `dist/web` après chaque push sur `main`. Cette version utilise automatiquement les données de démonstration lorsque l'API n'est pas disponible.
 
-1. Créer un dépôt GitHub nommé `crio` et y pousser ce dossier sur la branche `main`.
-2. Dans Koyeb, créer une App `crio` et un Web Service `web` depuis le dépôt GitHub.
-3. Choisir le builder `Dockerfile`, exposer le port HTTP `8000` sur la route `/`, et utiliser `/health` comme health check HTTP.
-4. Après le premier déploiement, désactiver l'Autodeploy Koyeb : les déploiements suivants seront déclenchés par GitHub Actions uniquement après les contrôles.
-5. Créer un token API Koyeb et l'ajouter au dépôt comme secret Actions `KOYEB_TOKEN`.
-6. Ajouter les variables Actions suivantes : `KOYEB_APP=crio`, `KOYEB_SERVICE=web`, `PRODUCTION_URL=https://…koyeb.app`.
-7. Protéger `main` avec une Pull Request et le status check `verify` recommandé.
+## Application full-stack
 
-## Fonctionnement ensuite
+Le `Dockerfile` produit un service Node.js unique sur le port `8000` : Fastify expose `/api/*` et sert l'application React compilée. Le health check est `GET /api/health`.
 
-Chaque Pull Request construit et teste l'image. Chaque merge dans `main` vérifie à nouveau l'image, redéploie Koyeb, attend la fin du déploiement puis vérifie `/health`.
+Variables d'environnement :
 
-## Future API et PostgreSQL
+| Variable | Requise | Rôle |
+| --- | --- | --- |
+| `PORT` | non | Port HTTP, `8000` dans l'image |
+| `DATABASE_URL` | en production | Connexion PostgreSQL |
 
-Quand le backend sera ajouté, insérer un job `migrate` entre `verify` et `deploy`, avec `DATABASE_URL` comme secret. Les migrations devront être versionnées, explicites et rétrocompatibles. Le endpoint `/health` devra alors contrôler l'API et PostgreSQL avant de répondre `200`.
+Avant un déploiement full-stack :
+
+1. créer une base PostgreSQL et définir `DATABASE_URL` ;
+2. exécuter `pnpm db:migrate` avec cette variable ;
+3. construire et démarrer l'image ;
+4. vérifier `/api/health`, puis `/` ;
+5. protéger `main` avec le job GitHub Actions `verify`.
+
+Le fournisseur d'hébergement sera choisi avant la mise en production de l'authentification. Il doit accepter une image Docker, des variables secrètes et une connexion PostgreSQL TLS.

@@ -13,65 +13,9 @@
         document.documentElement.dataset.theme = dark ? "dark" : "light";
       })();
     </script>
-    <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <header class="app-header">
-      <button class="brand" type="button" data-action="home" aria-label="Accueil cr.io">
-        <span class="brand-mark" aria-hidden="true">cr</span><span>.io</span>
-      </button>
-      <div class="header-actions">
-        <button class="icon-button" type="button" data-action="search" aria-label="Rechercher">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m21 21-4.35-4.35m2.35-5.65a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z"/></svg>
-        </button>
-        <button class="icon-button" type="button" data-action="theme" aria-label="Changer de thème">
-          <svg class="theme-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.9-.1-1.34A7 7 0 0 1 13.34 3.1C12.9 3.04 12.46 3 12 3Z"/></svg>
-        </button>
-        <button class="avatar" type="button" data-action="settings" aria-label="Ouvrir les réglages">CL</button>
-      </div>
-    </header>
-
-    <main id="app" tabindex="-1"></main>
-
-    <dialog id="search-dialog" class="dialog search-dialog">
-      <form method="dialog" class="dialog-shell">
-        <div class="dialog-head">
-          <div>
-            <span class="eyebrow">Recherche globale</span>
-            <h2>Retrouver un échantillon</h2>
-          </div>
-          <button class="icon-button" value="cancel" aria-label="Fermer">×</button>
-        </div>
-        <label class="search-field">
-          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m21 21-4.35-4.35m2.35-5.65a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z"/></svg>
-          <input id="search-input" type="search" autocomplete="off" placeholder="Nom, identifiant, projet…" />
-        </label>
-        <div id="search-results" class="search-results" aria-live="polite"></div>
-      </form>
-    </dialog>
-
-    <dialog id="settings-dialog" class="dialog settings-dialog">
-      <form method="dialog" class="dialog-shell">
-        <div class="dialog-head">
-          <div>
-            <span class="eyebrow">Préférences</span>
-            <h2>Réglages</h2>
-          </div>
-          <button class="icon-button" value="cancel" aria-label="Fermer">×</button>
-        </div>
-        <fieldset class="theme-options">
-          <legend>Thème</legend>
-          <label><input type="radio" name="theme" value="system" /> <span>Système</span></label>
-          <label><input type="radio" name="theme" value="light" /> <span>Clair</span></label>
-          <label><input type="radio" name="theme" value="dark" /> <span>Sombre</span></label>
-        </fieldset>
-        <div class="about">
-          <strong>cr.io</strong>
-          <span>Version 0.1.0 · prototype public</span>
-        </div>
-      </form>
-    </dialog>
-
-    <script src="app.js" defer></script>
+    <div id="root"></div>
+    <script type="module" src="/apps/web/src/main.tsx"></script>
   </body>
 </html>

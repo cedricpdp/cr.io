@@ -19,17 +19,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Check JavaScript syntax
-        run: node --check app.js
-      - name: Build and smoke-test production image
-        run: |
-          docker build --tag crio:production .
-          docker run --detach --name crio-prod-test --publish 18000:8000 crio:production
-          for attempt in {1..20}; do
-            curl --fail --silent http://127.0.0.1:18000/health && break
-            sleep 1
-          done
-          curl --fail --silent http://127.0.0.1:18000/ | grep --quiet "cr.io"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.19.0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build:web
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-build
+          path: dist/web
 
   deploy:
     needs: verify
@@ -38,12 +43,11 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v5
-      - name: Prepare static site
-        run: |
-          mkdir public
-          cp index.html styles.css app.js public/
-          touch public/.nojekyll
+      - uses: actions/download-artifact@v5
+        with:
+          name: web-build
+          path: public
+      - run: touch public/.nojekyll
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4
         with:

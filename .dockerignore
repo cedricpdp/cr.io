@@ -1,5 +1,6 @@
 .git
 .github
-docs
-README.md
+node_modules
+dist
+.env
 *.zip
