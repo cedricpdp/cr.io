@@ -12,7 +12,7 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Verify required files
         run: test -s index.html && test -s styles.css && test -s app.js && test -s nginx.conf
       - name: Check JavaScript syntax
