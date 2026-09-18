@@ -40,4 +40,4 @@ pnpm db:migrate
 
 ## État
 
-Version `0.2.0` : fondation full-stack, contrats partagés, schéma PostgreSQL et migration initiale. GitHub Pages reste la vitrine statique avec données de démonstration ; le Dockerfile est la cible de déploiement full-stack. Voir [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+Version `0.3.0` : fondation full-stack et authentification par e-mail/mot de passe avec Argon2id, sessions serveur et création automatique du premier workspace. GitHub Pages reste la vitrine statique avec données de démonstration ; le Dockerfile est la cible de déploiement full-stack. Voir [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).

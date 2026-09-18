@@ -1,7 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
+  authSessionSchema,
+  healthSchema,
   resolveLandingLevel,
   storageSnapshotSchema,
+  type AuthSession,
   type Freezer,
   type Rack,
   type Sample,
@@ -11,6 +14,7 @@ import {
 import { createDemoStorage } from "./demo-storage.js";
 
 type ThemePreference = "system" | "light" | "dark";
+type AppMode = "loading" | "demo" | "guest" | "authenticated";
 type Location = { freezer: Freezer; rack: Rack; box?: StorageBox };
 type SearchResult = Required<Location> & { sample: Sample };
 
@@ -27,6 +31,70 @@ function applyTheme(preference: ThemePreference) {
 
 function positionLabel(position: number, columns = 8) {
   return `${String.fromCharCode(65 + Math.floor((position - 1) / columns))}${((position - 1) % columns) + 1}`;
+}
+
+function AuthView({ onAuthenticated }: { onAuthenticated: (session: AuthSession) => Promise<void> }) {
+  const [screen, setScreen] = useState<"login" | "register">("login");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setSubmitting(true);
+    const values = new FormData(event.currentTarget);
+    const payload = screen === "login"
+      ? { email: values.get("email"), password: values.get("password") }
+      : {
+          email: values.get("email"),
+          password: values.get("password"),
+          displayName: values.get("displayName"),
+          workspaceName: values.get("workspaceName")
+        };
+
+    try {
+      const response = await fetch(`/api/auth/${screen}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const body: unknown = await response.json();
+      if (!response.ok) {
+        const message = typeof body === "object" && body !== null && "message" in body ? String(body.message) : "Impossible de se connecter.";
+        throw new Error(message);
+      }
+      await onAuthenticated(authSessionSchema.parse(body));
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : "Une erreur est survenue.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return <section className="auth-page">
+    <div className="auth-intro">
+      <span className="eyebrow">Stockage scientifique</span>
+      <h1>Vos échantillons.<br />À leur place.</h1>
+      <p className="subtitle">Une vue claire de chaque freezer, rack, box et position — sans détour.</p>
+    </div>
+    <div className="auth-card">
+      <div className="auth-tabs" role="tablist">
+        <button type="button" className={screen === "login" ? "active" : ""} onClick={() => { setScreen("login"); setError(""); }}>Connexion</button>
+        <button type="button" className={screen === "register" ? "active" : ""} onClick={() => { setScreen("register"); setError(""); }}>Créer un compte</button>
+      </div>
+      <form className="auth-form" onSubmit={(event) => void submit(event)}>
+        {screen === "register" && <>
+          <label>Votre nom<input name="displayName" autoComplete="name" required minLength={2} /></label>
+          <label>Nom du laboratoire<input name="workspaceName" autoComplete="organization" required minLength={2} /></label>
+        </>}
+        <label>Adresse e-mail<input name="email" type="email" autoComplete="email" required /></label>
+        <label>Mot de passe<input name="password" type="password" autoComplete={screen === "login" ? "current-password" : "new-password"} required minLength={screen === "register" ? 12 : 1} /></label>
+        {screen === "register" && <small>12 caractères minimum.</small>}
+        {error && <div className="form-error" role="alert">{error}</div>}
+        <button className="primary-button" type="submit" disabled={submitting}>{submitting ? "Un instant…" : screen === "login" ? "Se connecter" : "Créer mon espace"}</button>
+      </form>
+    </div>
+  </section>;
 }
 
 function BoxCard({ box, onOpen }: { box: StorageBox; onOpen: () => void }) {
@@ -120,6 +188,8 @@ function BoxView({ location, selectedPosition, onBack, onSelect }: { location: R
 }
 
 export function App() {
+  const [mode, setMode] = useState<AppMode>("loading");
+  const [authSession, setAuthSession] = useState<AuthSession>();
   const [snapshot, setSnapshot] = useState<StorageSnapshot>();
   const [location, setLocation] = useState<Location>();
   const [selectedPosition, setSelectedPosition] = useState<number | null>(null);
@@ -129,21 +199,49 @@ export function App() {
   const settingsDialog = useRef<HTMLDialogElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
 
+  function showStorage(data: StorageSnapshot) {
+    const landing = resolveLandingLevel(data);
+    setSnapshot(data);
+    if (landing.level === "boxes") setLocation({ freezer: landing.freezer, rack: landing.rack });
+    else if (landing.level === "racks" && landing.freezer.racks[0]) setLocation({ freezer: landing.freezer, rack: landing.freezer.racks[0] });
+    else if (data.freezers[0]?.racks[0]) setLocation({ freezer: data.freezers[0], rack: data.freezers[0].racks[0] });
+  }
+
+  async function loadStorage() {
+    const response = await fetch("/api/storage");
+    if (!response.ok) throw new Error(`API ${response.status}`);
+    showStorage(storageSnapshotSchema.parse(await response.json()));
+  }
+
   useEffect(() => {
     const controller = new AbortController();
-    void fetch("/api/storage", { signal: controller.signal })
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`API ${response.status}`);
-        return storageSnapshotSchema.parse(await response.json());
-      })
-      .catch(() => createDemoStorage())
-      .then((data) => {
-        const landing = resolveLandingLevel(data);
-        setSnapshot(data);
-        if (landing.level === "boxes") setLocation({ freezer: landing.freezer, rack: landing.rack });
-        else if (landing.level === "racks" && landing.freezer.racks[0]) setLocation({ freezer: landing.freezer, rack: landing.freezer.racks[0] });
-        else if (data.freezers[0]?.racks[0]) setLocation({ freezer: data.freezers[0], rack: data.freezers[0].racks[0] });
-      });
+    void (async () => {
+      try {
+        const healthResponse = await fetch("/api/health", { signal: controller.signal });
+        if (!healthResponse.ok) throw new Error("API indisponible");
+        const health = healthSchema.parse(await healthResponse.json());
+
+        if (health.database === "not_configured") {
+          await loadStorage();
+          setMode("demo");
+          return;
+        }
+
+        const sessionResponse = await fetch("/api/auth/session", { signal: controller.signal });
+        if (sessionResponse.status === 401) {
+          setMode("guest");
+          return;
+        }
+        if (!sessionResponse.ok) throw new Error("Session indisponible");
+        setAuthSession(authSessionSchema.parse(await sessionResponse.json()));
+        await loadStorage();
+        setMode("authenticated");
+      } catch {
+        if (controller.signal.aborted) return;
+        showStorage(createDemoStorage());
+        setMode("demo");
+      }
+    })();
     return () => controller.abort();
   }, []);
 
@@ -184,18 +282,38 @@ export function App() {
     setSelectedPosition(null);
   }
 
+  async function handleAuthenticated(session: AuthSession) {
+    setAuthSession(session);
+    await loadStorage();
+    setMode("authenticated");
+  }
+
+  async function logout() {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } finally {
+      settingsDialog.current?.close();
+      setAuthSession(undefined);
+      setSnapshot(undefined);
+      setLocation(undefined);
+      setMode("guest");
+    }
+  }
+
+  const initials = authSession?.user.displayName.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toLocaleUpperCase("fr") || "CL";
+
   return <>
     <header className="app-header">
       <button className="brand" type="button" onClick={goHome} aria-label="Accueil cr.io"><span className="brand-mark" aria-hidden="true">cr</span><span>.io</span></button>
       <div className="header-actions">
-        <button className="icon-button" type="button" onClick={openSearch} aria-label="Rechercher"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m21 21-4.35-4.35m2.35-5.65a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z" /></svg></button>
+        {(mode === "authenticated" || mode === "demo") && <button className="icon-button" type="button" onClick={openSearch} aria-label="Rechercher"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m21 21-4.35-4.35m2.35-5.65a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z" /></svg></button>}
         <button className="icon-button" type="button" onClick={() => setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark")} aria-label="Changer de thème"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.9-.1-1.34A7 7 0 0 1 13.34 3.1C12.9 3.04 12.46 3 12 3Z" /></svg></button>
-        <button className="avatar" type="button" onClick={() => settingsDialog.current?.showModal()} aria-label="Ouvrir les réglages">CL</button>
+        {mode !== "guest" && <button className="avatar" type="button" onClick={() => settingsDialog.current?.showModal()} aria-label="Ouvrir les réglages">{initials}</button>}
       </div>
     </header>
 
     <main id="app" tabIndex={-1}>
-      {!snapshot || !location ? <section className="page"><span className="eyebrow">Connexion</span><h1>Chargement du stockage…</h1></section> : location.box
+      {mode === "guest" ? <AuthView onAuthenticated={handleAuthenticated} /> : !snapshot || !location ? <section className="page"><span className="eyebrow">Connexion</span><h1>Chargement du stockage…</h1></section> : location.box
         ? <BoxView location={location as Required<Location>} selectedPosition={selectedPosition} onBack={() => { setLocation({ freezer: location.freezer, rack: location.rack }); setSelectedPosition(null); }} onSelect={setSelectedPosition} />
         : <BoxesView snapshot={snapshot} freezer={location.freezer} rack={location.rack} onOpenBox={(box) => { setLocation({ ...location, box }); setSelectedPosition(null); }} />}
     </main>
@@ -211,8 +329,10 @@ export function App() {
     <dialog ref={settingsDialog} className="dialog settings-dialog">
       <div className="dialog-shell">
         <div className="dialog-head"><div><span className="eyebrow">Préférences</span><h2>Réglages</h2></div><button className="icon-button" type="button" onClick={() => settingsDialog.current?.close()} aria-label="Fermer">×</button></div>
+        {authSession && <div className="account-summary"><strong>{authSession.user.displayName}</strong><span>{authSession.user.email}</span><small>{authSession.workspace.name} · {authSession.workspace.role}</small></div>}
         <fieldset className="theme-options"><legend>Thème</legend>{(["system", "light", "dark"] as const).map((value) => <label key={value}><input type="radio" name="theme" value={value} checked={theme === value} onChange={() => setTheme(value)} /><span>{{ system: "Système", light: "Clair", dark: "Sombre" }[value]}</span></label>)}</fieldset>
-        <div className="about"><strong>cr.io</strong><span>Version 0.2.0 · fondation full-stack</span></div>
+        {authSession && <button className="secondary-button" type="button" onClick={() => void logout()}>Se déconnecter</button>}
+        <div className="about"><strong>cr.io</strong><span>Version 0.3.0 · authentification</span></div>
       </div>
     </dialog>
   </>;
