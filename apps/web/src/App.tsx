@@ -3,6 +3,7 @@ import {
   authSessionSchema,
   healthSchema,
   resolveLandingLevel,
+  sampleSearchResponseSchema,
   storageSnapshotSchema,
   type AuthSession,
   type Freezer,
@@ -382,6 +383,9 @@ export function App() {
   const [sampleEditor, setSampleEditor] = useState<SampleEditorState>();
   const [selectedPosition, setSelectedPosition] = useState<number | null>(null);
   const [query, setQuery] = useState("");
+  const [remoteResults, setRemoteResults] = useState<SearchResult[]>();
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searching, setSearching] = useState(false);
   const [theme, setTheme] = useState<ThemePreference>(getThemePreference);
   const searchDialog = useRef<HTMLDialogElement>(null);
   const settingsDialog = useRef<HTMLDialogElement>(null);
@@ -453,7 +457,7 @@ export function App() {
     return () => media.removeEventListener("change", onChange);
   }, [theme]);
 
-  const results = useMemo<SearchResult[]>(() => {
+  const localResults = useMemo<SearchResult[]>(() => {
     if (!snapshot) return [];
     const normalized = query.trim().toLocaleLowerCase("fr");
     return snapshot.freezers.flatMap((freezer) => freezer.racks.flatMap((rack) => rack.boxes.flatMap((box) => box.samples
@@ -462,8 +466,38 @@ export function App() {
       .slice(0, normalized ? 12 : 5);
   }, [query, snapshot]);
 
+  useEffect(() => {
+    if (mode !== "authenticated" || !searchOpen || !snapshot) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      setSearching(true);
+      void fetch(`/api/search?q=${encodeURIComponent(query.trim())}&limit=12`, { signal: controller.signal })
+        .then(async (response) => {
+          if (!response.ok) throw new Error(`API ${response.status}`);
+          return sampleSearchResponseSchema.parse(await response.json());
+        })
+        .then(({ results }) => {
+          const mapped = results.flatMap((result): SearchResult[] => {
+            const freezer = snapshot.freezers.find((item) => item.id === result.freezer.id);
+            const rack = freezer?.racks.find((item) => item.id === result.rack.id);
+            const box = rack?.boxes.find((item) => item.id === result.box.id);
+            const sample = box?.samples.find((item) => item.recordId === result.recordId);
+            return freezer && rack && box && sample ? [{ freezer, rack, box, sample }] : [];
+          });
+          setRemoteResults(mapped);
+        })
+        .catch(() => { if (!controller.signal.aborted) setRemoteResults(localResults); })
+        .finally(() => { if (!controller.signal.aborted) setSearching(false); });
+    }, 180);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [localResults, mode, query, searchOpen, snapshot]);
+
+  const results = mode === "authenticated" ? remoteResults ?? [] : localResults;
+
   function openSearch() {
     setQuery("");
+    setRemoteResults(undefined);
+    setSearchOpen(true);
     searchDialog.current?.showModal();
     window.setTimeout(() => searchInput.current?.focus(), 0);
   }
@@ -585,11 +619,11 @@ export function App() {
     {editor && <EntityEditor state={editor} onClose={() => setEditor(undefined)} onSaved={async () => { setEditor(undefined); await loadStorage(); }} />}
     {sampleEditor && snapshot && <SampleEditor state={sampleEditor} snapshot={snapshot} onClose={() => setSampleEditor(undefined)} onSaved={async (boxId, position) => { setSampleEditor(undefined); await loadStorage({ boxId, position }); }} />}
 
-    <dialog ref={searchDialog} className="dialog search-dialog">
+    <dialog ref={searchDialog} className="dialog search-dialog" onClose={() => setSearchOpen(false)}>
       <div className="dialog-shell">
         <div className="dialog-head"><div><span className="eyebrow">Recherche globale</span><h2>Retrouver un échantillon</h2></div><button className="icon-button" type="button" onClick={() => searchDialog.current?.close()} aria-label="Fermer">×</button></div>
         <label className="search-field"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m21 21-4.35-4.35m2.35-5.65a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z" /></svg><input ref={searchInput} type="search" autoComplete="off" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nom, identifiant, projet…" /></label>
-        <div className="search-results" aria-live="polite">{results.length ? results.map((result) => <button className="result" type="button" key={`${result.box.id}-${result.sample.position}`} onClick={() => openResult(result)}><span><strong>{result.sample.name}</strong><br /><small>{result.sample.id} · {result.sample.project}</small></span><small>{result.box.name} / {positionLabel(result.sample.position, result.box.columns)}</small></button>) : <div className="empty-results">Aucun échantillon trouvé.</div>}</div>
+        <div className="search-results" aria-live="polite">{searching ? <div className="empty-results">Recherche…</div> : results.length ? results.map((result) => <button className="result" type="button" key={result.sample.recordId ?? `${result.box.id}-${result.sample.position}`} onClick={() => openResult(result)}><span><strong>{result.sample.name}</strong><br /><small>{result.sample.id} · {result.sample.project}</small></span><small>{result.box.name} / {positionLabel(result.sample.position, result.box.columns)}</small></button>) : <div className="empty-results">Aucun échantillon trouvé.</div>}</div>
       </div>
     </dialog>
 
@@ -598,8 +632,9 @@ export function App() {
         <div className="dialog-head"><div><span className="eyebrow">Préférences</span><h2>Réglages</h2></div><button className="icon-button" type="button" onClick={() => settingsDialog.current?.close()} aria-label="Fermer">×</button></div>
         {authSession && <div className="account-summary"><strong>{authSession.user.displayName}</strong><span>{authSession.user.email}</span><small>{authSession.workspace.name} · {authSession.workspace.role}</small></div>}
         <fieldset className="theme-options"><legend>Thème</legend>{(["system", "light", "dark"] as const).map((value) => <label key={value}><input type="radio" name="theme" value={value} checked={theme === value} onChange={() => setTheme(value)} /><span>{{ system: "Système", light: "Clair", dark: "Sombre" }[value]}</span></label>)}</fieldset>
+        {authSession && <a className="secondary-button export-link" href="/api/export/samples.csv" download>Télécharger l’export CSV</a>}
         {authSession && <button className="secondary-button" type="button" onClick={() => void logout()}>Se déconnecter</button>}
-        <div className="about"><strong>cr.io</strong><span>Version 0.5.0 · échantillons</span></div>
+        <div className="about"><strong>cr.io</strong><span>Version 0.6.0 · recherche et export</span></div>
       </div>
     </dialog>
   </>;

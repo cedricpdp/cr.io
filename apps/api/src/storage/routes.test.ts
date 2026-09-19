@@ -5,6 +5,8 @@ import type {
   CreateRack,
   CreateSample,
   MoveSample,
+  SampleSearchResult,
+  SearchQuery,
   StorageSnapshot,
   UpdateBox,
   UpdateFreezer,
@@ -15,7 +17,7 @@ import { MemoryAuthRepository } from "../../test/memory-auth.js";
 import { buildApp } from "../app.js";
 import { AuthService } from "../auth/service.js";
 import { StorageConflictError } from "./errors.js";
-import type { StorageRepository } from "./repository.js";
+import type { SampleExportRow, StorageRepository } from "./repository.js";
 
 const WORKSPACE_ID = "00000000-0000-4000-8000-000000000002";
 const FREEZER_ID = "00000000-0000-4000-8000-000000000010";
@@ -26,6 +28,7 @@ const SAMPLE_ID = "00000000-0000-4000-8000-000000000040";
 class MemoryStorageRepository implements StorageRepository {
   readonly workspaceCalls: string[] = [];
   conflict = false;
+  lastSearch?: SearchQuery;
 
   async getSnapshot(workspaceId: string, workspaceName: string): Promise<StorageSnapshot> {
     this.workspaceCalls.push(workspaceId);
@@ -95,6 +98,27 @@ class MemoryStorageRepository implements StorageRepository {
   async deleteSample(workspaceId: string, _id: string) {
     this.record(workspaceId);
     return true;
+  }
+
+  async searchSamples(workspaceId: string, input: SearchQuery): Promise<SampleSearchResult[]> {
+    this.record(workspaceId);
+    this.lastSearch = input;
+    return [{
+      recordId: SAMPLE_ID,
+      externalId: "CR-001",
+      name: "Plasma 1",
+      project: "OncoMap",
+      storedAt: "2026-09-19",
+      position: 1,
+      box: { id: BOX_ID, name: "Box 01" },
+      rack: { id: RACK_ID, name: "Rack A" },
+      freezer: { id: FREEZER_ID, name: "Freezer −80 °C" }
+    }];
+  }
+
+  async exportSamples(workspaceId: string): Promise<SampleExportRow[]> {
+    this.record(workspaceId);
+    return [{ externalId: "=1+1", name: "Plasma; témoin", project: "OncoMap", storedAt: "2026-09-19", freezer: "Freezer −80 °C", rack: "Rack A", box: "Box 01", position: 1 }];
   }
 
   private record(workspaceId: string) {
@@ -173,5 +197,26 @@ describe("workspace storage routes", () => {
     repository.conflict = true;
     const conflict = await app.inject({ method: "POST", url: "/api/freezers", headers: { cookie }, payload: { name: "Duplicate", temperatureCelsius: -80 } });
     expect(conflict.statusCode).toBe(409);
+  });
+
+  it("searches in the session workspace with a bounded limit", async () => {
+    const { app, repository, cookie } = await authenticatedApp();
+    const response = await app.inject({ method: "GET", url: "/api/search?q=plasma&limit=5", headers: { cookie } });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().results[0].recordId).toBe(SAMPLE_ID);
+    expect(repository.lastSearch).toEqual({ q: "plasma", limit: 5 });
+    expect(repository.workspaceCalls).toEqual([WORKSPACE_ID]);
+  });
+
+  it("exports an Excel-compatible CSV and neutralizes formulas", async () => {
+    const { app, repository, cookie } = await authenticatedApp();
+    const response = await app.inject({ method: "GET", url: "/api/export/samples.csv", headers: { cookie } });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toContain("text/csv");
+    expect(response.headers["content-disposition"]).toContain("crio-samples.csv");
+    expect(response.body.startsWith("\uFEFF")).toBe(true);
+    expect(response.body).toContain("\"'=1+1\"");
+    expect(response.body).toContain("\"Plasma; témoin\"");
+    expect(repository.workspaceCalls).toEqual([WORKSPACE_ID]);
   });
 });

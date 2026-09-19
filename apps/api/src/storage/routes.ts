@@ -10,6 +10,7 @@ import {
   freezerIdParamsSchema,
   moveSampleSchema,
   rackIdParamsSchema,
+  searchQuerySchema,
   updateBoxSchema,
   updateFreezerSchema,
   updateRackSchema,
@@ -19,6 +20,7 @@ import { SESSION_COOKIE } from "../auth/routes.js";
 import type { AuthService } from "../auth/service.js";
 import { createDemoStorage } from "../demo-storage.js";
 import { StorageConflictError, StoragePositionError } from "./errors.js";
+import { renderSamplesCsv } from "./csv.js";
 import type { StorageRepository } from "./repository.js";
 
 export interface StorageRoutesOptions {
@@ -74,6 +76,27 @@ export const storageRoutes: FastifyPluginAsync<StorageRoutesOptions> = async (ap
     if (!workspace) return;
     if (!options.repository) return createDemoStorage();
     return options.repository.getSnapshot(workspace.id, workspace.name);
+  });
+
+  app.get("/search", async (request, reply) => {
+    if (!options.repository || !options.authService) return unavailable(reply);
+    const workspace = await workspaceFor(request, reply, options.authService);
+    if (!workspace) return;
+    const query = parse(searchQuerySchema, request.query, reply);
+    if (!query) return;
+    return { results: await options.repository.searchSamples(workspace.id, query) };
+  });
+
+  app.get("/export/samples.csv", async (request, reply) => {
+    if (!options.repository || !options.authService) return unavailable(reply);
+    const workspace = await workspaceFor(request, reply, options.authService);
+    if (!workspace) return;
+    const csv = renderSamplesCsv(await options.repository.exportSamples(workspace.id));
+    return reply
+      .header("content-type", "text/csv; charset=utf-8")
+      .header("content-disposition", 'attachment; filename="crio-samples.csv"')
+      .header("cache-control", "no-store")
+      .send(csv);
   });
 
   app.post("/freezers", async (request, reply) => {

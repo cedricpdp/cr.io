@@ -5,6 +5,8 @@ Toutes les routes métier exigent le cookie de session `crio_session`. Le worksp
 | Méthode | Route | Fonction |
 | --- | --- | --- |
 | `GET` | `/api/storage` | Hiérarchie complète du workspace |
+| `GET` | `/api/search?q=…&limit=…` | Rechercher des échantillons, maximum 50 résultats |
+| `GET` | `/api/export/samples.csv` | Exporter les échantillons du workspace |
 | `POST` | `/api/freezers` | Créer un freezer |
 | `PATCH` | `/api/freezers/:id` | Modifier un freezer |
 | `DELETE` | `/api/freezers/:id` | Supprimer un freezer et son contenu |

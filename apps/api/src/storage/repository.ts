@@ -1,10 +1,12 @@
-import { and, asc, eq, gt, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, ilike, or, sql } from "drizzle-orm";
 import type {
   CreateBox,
   CreateFreezer,
   CreateRack,
   CreateSample,
   MoveSample,
+  SampleSearchResult,
+  SearchQuery,
   StorageSnapshot,
   UpdateBox,
   UpdateFreezer,
@@ -37,6 +39,19 @@ export interface StorageRepository {
   updateSample(workspaceId: string, id: string, input: UpdateSample): Promise<boolean>;
   moveSample(workspaceId: string, id: string, input: MoveSample): Promise<boolean>;
   deleteSample(workspaceId: string, id: string): Promise<boolean>;
+  searchSamples(workspaceId: string, input: SearchQuery): Promise<SampleSearchResult[]>;
+  exportSamples(workspaceId: string): Promise<SampleExportRow[]>;
+}
+
+export interface SampleExportRow {
+  externalId: string;
+  name: string;
+  project: string;
+  storedAt: string;
+  freezer: string;
+  rack: string;
+  box: string;
+  position: number;
 }
 
 function isUniqueViolation(error: unknown) {
@@ -228,6 +243,78 @@ export class DrizzleStorageRepository implements StorageRepository {
   async deleteSample(workspaceId: string, id: string) {
     const rows = await this.database.delete(samples).where(and(eq(samples.id, id), eq(samples.workspaceId, workspaceId))).returning({ id: samples.id });
     return rows.length === 1;
+  }
+
+  async searchSamples(workspaceId: string, input: SearchQuery): Promise<SampleSearchResult[]> {
+    const term = `%${input.q}%`;
+    const rows = await this.database.select({
+      recordId: samples.id,
+      externalId: samples.externalId,
+      name: samples.name,
+      project: samples.project,
+      storedAt: samples.storedAt,
+      row: samples.row,
+      column: samples.column,
+      boxColumns: boxes.columns,
+      boxId: boxes.id,
+      boxName: boxes.name,
+      rackId: racks.id,
+      rackName: racks.name,
+      freezerId: freezers.id,
+      freezerName: freezers.name
+    }).from(samples)
+      .innerJoin(boxes, eq(boxes.id, samples.boxId))
+      .innerJoin(racks, eq(racks.id, boxes.rackId))
+      .innerJoin(freezers, eq(freezers.id, racks.freezerId))
+      .where(input.q ? and(
+        eq(samples.workspaceId, workspaceId),
+        or(ilike(samples.externalId, term), ilike(samples.name, term), ilike(samples.project, term), ilike(boxes.name, term))
+      ) : eq(samples.workspaceId, workspaceId))
+      .orderBy(asc(samples.name), asc(samples.externalId))
+      .limit(input.limit);
+
+    return rows.map((row) => ({
+      recordId: row.recordId,
+      externalId: row.externalId,
+      name: row.name,
+      project: row.project,
+      storedAt: row.storedAt.toISOString().slice(0, 10),
+      position: (row.row - 1) * row.boxColumns + row.column,
+      box: { id: row.boxId, name: row.boxName },
+      rack: { id: row.rackId, name: row.rackName },
+      freezer: { id: row.freezerId, name: row.freezerName }
+    }));
+  }
+
+  async exportSamples(workspaceId: string): Promise<SampleExportRow[]> {
+    const rows = await this.database.select({
+      externalId: samples.externalId,
+      name: samples.name,
+      project: samples.project,
+      storedAt: samples.storedAt,
+      row: samples.row,
+      column: samples.column,
+      boxColumns: boxes.columns,
+      boxName: boxes.name,
+      rackName: racks.name,
+      freezerName: freezers.name
+    }).from(samples)
+      .innerJoin(boxes, eq(boxes.id, samples.boxId))
+      .innerJoin(racks, eq(racks.id, boxes.rackId))
+      .innerJoin(freezers, eq(freezers.id, racks.freezerId))
+      .where(eq(samples.workspaceId, workspaceId))
+      .orderBy(asc(freezers.name), asc(racks.position), asc(boxes.position), asc(samples.row), asc(samples.column));
+
+    return rows.map((row) => ({
+      externalId: row.externalId,
+      name: row.name,
+      project: row.project,
+      storedAt: row.storedAt.toISOString().slice(0, 10),
+      freezer: row.freezerName,
+      rack: row.rackName,
+      box: row.boxName,
+      position: (row.row - 1) * row.boxColumns + row.column
+    }));
   }
 
   private async ownsFreezer(workspaceId: string, id: string) {
