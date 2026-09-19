@@ -38,7 +38,7 @@ export async function buildApp(options: AppOptions = {}) {
 
   app.get("/api/live", async (_request, reply) => reply.send({
     status: "ok",
-    version: process.env.npm_package_version ?? "0.7.1"
+    version: process.env.npm_package_version ?? "0.7.2"
   }));
 
   app.get("/api/health", async (_request, reply) => {
@@ -46,7 +46,7 @@ export async function buildApp(options: AppOptions = {}) {
     return reply.send({
       status: "ok",
       database: database ? "ok" : "not_configured",
-      version: process.env.npm_package_version ?? "0.7.1"
+      version: process.env.npm_package_version ?? "0.7.2"
     });
   });
 

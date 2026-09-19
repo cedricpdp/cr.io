@@ -1,4 +1,4 @@
-const CACHE_NAME = "crio-shell-v0.7.1";
+const CACHE_NAME = "crio-shell-v0.7.2";
 const APP_SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icons/crio.svg"];
 
 self.addEventListener("install", (event) => {
