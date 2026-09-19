@@ -1,9 +1,10 @@
-import { and, asc, eq, gt, ilike, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, ilike, or, sql } from "drizzle-orm";
 import type {
   CreateBox,
   CreateFreezer,
   CreateRack,
   CreateSample,
+  ExportSamplesQuery,
   MoveSample,
   SampleSearchResult,
   SearchQuery,
@@ -17,12 +18,18 @@ import {
   boxes,
   freezers,
   racks,
+  sampleHistory,
   samples,
   type Database
 } from "../../../../packages/db/src/index.js";
 import { StorageConflictError, StoragePositionError } from "./errors.js";
 
 type DrizzleDatabase = Database["db"];
+
+export interface StorageActor {
+  userId: string;
+  displayName: string;
+}
 
 export interface StorageRepository {
   getSnapshot(workspaceId: string, workspaceName: string): Promise<StorageSnapshot>;
@@ -35,18 +42,20 @@ export interface StorageRepository {
   createBox(workspaceId: string, rackId: string, input: CreateBox): Promise<string | undefined>;
   updateBox(workspaceId: string, id: string, input: UpdateBox): Promise<boolean>;
   deleteBox(workspaceId: string, id: string): Promise<boolean>;
-  createSample(workspaceId: string, boxId: string, input: CreateSample): Promise<string | undefined>;
-  updateSample(workspaceId: string, id: string, input: UpdateSample): Promise<boolean>;
-  moveSample(workspaceId: string, id: string, input: MoveSample): Promise<boolean>;
+  createSample(workspaceId: string, boxId: string, input: CreateSample, actor: StorageActor): Promise<string | undefined>;
+  updateSample(workspaceId: string, id: string, input: UpdateSample, actor: StorageActor): Promise<boolean>;
+  moveSample(workspaceId: string, id: string, input: MoveSample, actor: StorageActor): Promise<boolean>;
   deleteSample(workspaceId: string, id: string): Promise<boolean>;
+  wipeStorage(workspaceId: string): Promise<void>;
   searchSamples(workspaceId: string, input: SearchQuery): Promise<SampleSearchResult[]>;
-  exportSamples(workspaceId: string): Promise<SampleExportRow[]>;
+  exportSamples(workspaceId: string, filter?: ExportSamplesQuery): Promise<SampleExportRow[]>;
 }
 
 export interface SampleExportRow {
-  externalId: string;
   name: string;
   project: string;
+  experimenter: string;
+  description: string;
   storedAt: string;
   freezer: string;
   rack: string;
@@ -56,6 +65,17 @@ export interface SampleExportRow {
 
 function isUniqueViolation(error: unknown) {
   return typeof error === "object" && error !== null && "code" in error && error.code === "23505";
+}
+
+function positionLabel(position: number, columns: number) {
+  let row = Math.floor((position - 1) / columns) + 1;
+  let label = "";
+  while (row > 0) {
+    row -= 1;
+    label = String.fromCharCode(65 + (row % 26)) + label;
+    row = Math.floor(row / 26);
+  }
+  return `${label}${((position - 1) % columns) + 1}`;
 }
 
 export class DrizzleStorageRepository implements StorageRepository {
@@ -75,9 +95,10 @@ export class DrizzleStorageRepository implements StorageRepository {
     const sampleRows = await this.database.select({
       boxId: samples.boxId,
       recordId: samples.id,
-      id: samples.externalId,
       name: samples.name,
       project: samples.project,
+      experimenter: samples.experimenter,
+      description: samples.description,
       row: samples.row,
       column: samples.column,
       storedAt: samples.storedAt,
@@ -87,6 +108,23 @@ export class DrizzleStorageRepository implements StorageRepository {
       .innerJoin(racks, eq(racks.id, boxes.rackId))
       .innerJoin(freezers, eq(freezers.id, racks.freezerId))
       .where(eq(freezers.workspaceId, workspaceId));
+    const historyRows = await this.database.select({
+      id: sampleHistory.id,
+      sampleId: sampleHistory.sampleId,
+      actorName: sampleHistory.actorName,
+      action: sampleHistory.action,
+      details: sampleHistory.details,
+      createdAt: sampleHistory.createdAt
+    }).from(sampleHistory)
+      .where(eq(sampleHistory.workspaceId, workspaceId))
+      .orderBy(desc(sampleHistory.createdAt));
+    const historyBySample = new Map<string, StorageSnapshot["freezers"][number]["racks"][number]["boxes"][number]["samples"][number]["history"]>();
+    for (const entry of historyRows) {
+      if (entry.action !== "created" && entry.action !== "updated" && entry.action !== "moved") continue;
+      const history = historyBySample.get(entry.sampleId) ?? [];
+      history.push({ ...entry, action: entry.action, createdAt: entry.createdAt.toISOString() });
+      historyBySample.set(entry.sampleId, history);
+    }
 
     const freezerMap = new Map(freezerRows.map((freezer) => [freezer.id, {
       id: freezer.id,
@@ -102,18 +140,20 @@ export class DrizzleStorageRepository implements StorageRepository {
     }
     const boxMap = new Map<string, StorageSnapshot["freezers"][number]["racks"][number]["boxes"][number]>();
     for (const { box } of boxRows) {
-      const result = { id: box.id, name: box.name, rows: box.rows, columns: box.columns, samples: [] as StorageSnapshot["freezers"][number]["racks"][number]["boxes"][number]["samples"] };
+      const result = { id: box.id, name: box.name, project: box.project, rows: box.rows, columns: box.columns, samples: [] as StorageSnapshot["freezers"][number]["racks"][number]["boxes"][number]["samples"] };
       boxMap.set(box.id, result);
       rackMap.get(box.rackId)?.boxes.push(result);
     }
     for (const sample of sampleRows) {
       boxMap.get(sample.boxId)?.samples.push({
         recordId: sample.recordId,
-        id: sample.id,
         name: sample.name,
         project: sample.project,
+        experimenter: sample.experimenter,
+        description: sample.description,
         date: sample.storedAt.toISOString().slice(0, 10),
-        position: (sample.row - 1) * sample.boxColumns + sample.column
+        position: (sample.row - 1) * sample.boxColumns + sample.column,
+        history: historyBySample.get(sample.recordId) ?? []
       });
     }
 
@@ -195,48 +235,98 @@ export class DrizzleStorageRepository implements StorageRepository {
     return rows.length === 1;
   }
 
-  async createSample(workspaceId: string, boxId: string, input: CreateSample) {
+  async createSample(workspaceId: string, boxId: string, input: CreateSample, actor: StorageActor) {
     const targetBox = await this.getOwnedBox(workspaceId, boxId);
     if (!targetBox) return undefined;
     const coordinates = this.coordinates(input.position, targetBox.rows, targetBox.columns);
     return this.withConflictHandling(async () => {
-      const [created] = await this.database.insert(samples).values({
-        workspaceId,
-        boxId,
-        externalId: input.externalId,
-        name: input.name,
-        project: input.project,
-        storedAt: new Date(`${input.storedAt}T00:00:00.000Z`),
-        ...coordinates
-      }).returning({ id: samples.id });
-      return created?.id;
+      return this.database.transaction(async (transaction) => {
+        const [created] = await transaction.insert(samples).values({
+          workspaceId,
+          boxId,
+          name: input.name,
+          project: input.project,
+          experimenter: input.experimenter,
+          description: input.description,
+          storedAt: new Date(`${input.storedAt}T00:00:00.000Z`),
+          ...coordinates
+        }).returning({ id: samples.id });
+        if (!created) return undefined;
+        await transaction.insert(sampleHistory).values({
+          sampleId: created.id,
+          workspaceId,
+          actorUserId: actor.userId,
+          actorName: actor.displayName,
+          action: "created",
+          details: `Création dans ${targetBox.name} en ${positionLabel(input.position, targetBox.columns)}`
+        });
+        return created.id;
+      });
     });
   }
 
-  async updateSample(workspaceId: string, id: string, input: UpdateSample) {
+  async updateSample(workspaceId: string, id: string, input: UpdateSample, actor: StorageActor) {
     const values = {
-      ...(input.externalId === undefined ? {} : { externalId: input.externalId }),
       ...(input.name === undefined ? {} : { name: input.name }),
       ...(input.project === undefined ? {} : { project: input.project }),
+      ...(input.experimenter === undefined ? {} : { experimenter: input.experimenter }),
+      ...(input.description === undefined ? {} : { description: input.description }),
       ...(input.storedAt === undefined ? {} : { storedAt: new Date(`${input.storedAt}T00:00:00.000Z`) }),
       updatedAt: new Date()
     };
     return this.withConflictHandling(async () => {
-      const rows = await this.database.update(samples).set(values)
-        .where(and(eq(samples.id, id), eq(samples.workspaceId, workspaceId))).returning({ id: samples.id });
-      return rows.length === 1;
+      return this.database.transaction(async (transaction) => {
+        const [current] = await transaction.select({
+          name: samples.name,
+          project: samples.project,
+          experimenter: samples.experimenter,
+          description: samples.description,
+          storedAt: samples.storedAt
+        }).from(samples).where(and(eq(samples.id, id), eq(samples.workspaceId, workspaceId))).limit(1);
+        if (!current) return false;
+        const rows = await transaction.update(samples).set(values)
+          .where(and(eq(samples.id, id), eq(samples.workspaceId, workspaceId))).returning({ id: samples.id });
+        if (rows.length !== 1) return false;
+        const labels: Record<keyof UpdateSample, string> = { name: "nom", project: "projet", experimenter: "expérimentateur", description: "description", storedAt: "date de stockage" };
+        const currentValues: Record<keyof UpdateSample, string> = {
+          name: current.name,
+          project: current.project,
+          experimenter: current.experimenter,
+          description: current.description,
+          storedAt: current.storedAt.toISOString().slice(0, 10)
+        };
+        const changed = (Object.keys(input) as (keyof UpdateSample)[])
+          .filter((key) => input[key] !== currentValues[key])
+          .map((key) => labels[key]);
+        if (changed.length) {
+          await transaction.insert(sampleHistory).values({ sampleId: id, workspaceId, actorUserId: actor.userId, actorName: actor.displayName, action: "updated", details: `Modification : ${changed.join(", ")}` });
+        }
+        return true;
+      });
     });
   }
 
-  async moveSample(workspaceId: string, id: string, input: MoveSample) {
-    if (!await this.ownsSample(workspaceId, id)) return false;
+  async moveSample(workspaceId: string, id: string, input: MoveSample, actor: StorageActor) {
+    const origin = await this.getOwnedSampleLocation(workspaceId, id);
+    if (!origin) return false;
     const targetBox = await this.getOwnedBox(workspaceId, input.boxId);
     if (!targetBox) return false;
     const coordinates = this.coordinates(input.position, targetBox.rows, targetBox.columns);
     return this.withConflictHandling(async () => {
-      const rows = await this.database.update(samples).set({ boxId: input.boxId, ...coordinates, updatedAt: new Date() })
-        .where(and(eq(samples.id, id), eq(samples.workspaceId, workspaceId))).returning({ id: samples.id });
-      return rows.length === 1;
+      return this.database.transaction(async (transaction) => {
+        const rows = await transaction.update(samples).set({ boxId: input.boxId, ...coordinates, updatedAt: new Date() })
+          .where(and(eq(samples.id, id), eq(samples.workspaceId, workspaceId))).returning({ id: samples.id });
+        if (rows.length !== 1) return false;
+        await transaction.insert(sampleHistory).values({
+          sampleId: id,
+          workspaceId,
+          actorUserId: actor.userId,
+          actorName: actor.displayName,
+          action: "moved",
+          details: `Déplacement de ${origin.boxName} / ${positionLabel((origin.row - 1) * origin.columns + origin.column, origin.columns)} vers ${targetBox.name} / ${positionLabel(input.position, targetBox.columns)}`
+        });
+        return true;
+      });
     });
   }
 
@@ -245,13 +335,18 @@ export class DrizzleStorageRepository implements StorageRepository {
     return rows.length === 1;
   }
 
+  async wipeStorage(workspaceId: string) {
+    await this.database.delete(freezers).where(eq(freezers.workspaceId, workspaceId));
+  }
+
   async searchSamples(workspaceId: string, input: SearchQuery): Promise<SampleSearchResult[]> {
     const term = `%${input.q}%`;
     const rows = await this.database.select({
       recordId: samples.id,
-      externalId: samples.externalId,
       name: samples.name,
       project: samples.project,
+      experimenter: samples.experimenter,
+      description: samples.description,
       storedAt: samples.storedAt,
       row: samples.row,
       column: samples.column,
@@ -268,16 +363,17 @@ export class DrizzleStorageRepository implements StorageRepository {
       .innerJoin(freezers, eq(freezers.id, racks.freezerId))
       .where(input.q ? and(
         eq(samples.workspaceId, workspaceId),
-        or(ilike(samples.externalId, term), ilike(samples.name, term), ilike(samples.project, term), ilike(boxes.name, term))
+        or(ilike(samples.name, term), ilike(samples.project, term), ilike(samples.experimenter, term), ilike(samples.description, term), ilike(boxes.name, term))
       ) : eq(samples.workspaceId, workspaceId))
-      .orderBy(asc(samples.name), asc(samples.externalId))
+      .orderBy(asc(samples.name))
       .limit(input.limit);
 
     return rows.map((row) => ({
       recordId: row.recordId,
-      externalId: row.externalId,
       name: row.name,
       project: row.project,
+      experimenter: row.experimenter,
+      description: row.description,
       storedAt: row.storedAt.toISOString().slice(0, 10),
       position: (row.row - 1) * row.boxColumns + row.column,
       box: { id: row.boxId, name: row.boxName },
@@ -286,11 +382,16 @@ export class DrizzleStorageRepository implements StorageRepository {
     }));
   }
 
-  async exportSamples(workspaceId: string): Promise<SampleExportRow[]> {
+  async exportSamples(workspaceId: string, filter: ExportSamplesQuery = {}): Promise<SampleExportRow[]> {
+    const conditions = [eq(samples.workspaceId, workspaceId)];
+    if (filter.freezerId) conditions.push(eq(freezers.id, filter.freezerId));
+    if (filter.rackId) conditions.push(eq(racks.id, filter.rackId));
+    if (filter.boxId) conditions.push(eq(boxes.id, filter.boxId));
     const rows = await this.database.select({
-      externalId: samples.externalId,
       name: samples.name,
       project: samples.project,
+      experimenter: samples.experimenter,
+      description: samples.description,
       storedAt: samples.storedAt,
       row: samples.row,
       column: samples.column,
@@ -302,13 +403,14 @@ export class DrizzleStorageRepository implements StorageRepository {
       .innerJoin(boxes, eq(boxes.id, samples.boxId))
       .innerJoin(racks, eq(racks.id, boxes.rackId))
       .innerJoin(freezers, eq(freezers.id, racks.freezerId))
-      .where(eq(samples.workspaceId, workspaceId))
+      .where(and(...conditions))
       .orderBy(asc(freezers.name), asc(racks.position), asc(boxes.position), asc(samples.row), asc(samples.column));
 
     return rows.map((row) => ({
-      externalId: row.externalId,
       name: row.name,
       project: row.project,
+      experimenter: row.experimenter,
+      description: row.description,
       storedAt: row.storedAt.toISOString().slice(0, 10),
       freezer: row.freezerName,
       rack: row.rackName,
@@ -337,17 +439,20 @@ export class DrizzleStorageRepository implements StorageRepository {
     return rows.length === 1;
   }
 
-  private async ownsSample(workspaceId: string, id: string) {
-    const rows = await this.database.select({ id: samples.id }).from(samples)
-      .where(and(eq(samples.id, id), eq(samples.workspaceId, workspaceId))).limit(1);
-    return rows.length === 1;
-  }
-
   private async getOwnedBox(workspaceId: string, id: string) {
-    const [result] = await this.database.select({ id: boxes.id, rows: boxes.rows, columns: boxes.columns }).from(boxes)
+    const [result] = await this.database.select({ id: boxes.id, name: boxes.name, rows: boxes.rows, columns: boxes.columns }).from(boxes)
       .innerJoin(racks, eq(racks.id, boxes.rackId))
       .innerJoin(freezers, eq(freezers.id, racks.freezerId))
       .where(and(eq(boxes.id, id), eq(freezers.workspaceId, workspaceId))).limit(1);
+    return result;
+  }
+
+  private async getOwnedSampleLocation(workspaceId: string, id: string) {
+    const [result] = await this.database.select({ row: samples.row, column: samples.column, boxName: boxes.name, columns: boxes.columns })
+      .from(samples)
+      .innerJoin(boxes, eq(boxes.id, samples.boxId))
+      .where(and(eq(samples.id, id), eq(samples.workspaceId, workspaceId)))
+      .limit(1);
     return result;
   }
 

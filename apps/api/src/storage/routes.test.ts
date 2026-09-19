@@ -4,6 +4,7 @@ import type {
   CreateFreezer,
   CreateRack,
   CreateSample,
+  ExportSamplesQuery,
   MoveSample,
   SampleSearchResult,
   SearchQuery,
@@ -29,6 +30,7 @@ class MemoryStorageRepository implements StorageRepository {
   readonly workspaceCalls: string[] = [];
   conflict = false;
   lastSearch?: SearchQuery;
+  lastExportFilter?: ExportSamplesQuery;
 
   async getSnapshot(workspaceId: string, workspaceName: string): Promise<StorageSnapshot> {
     this.workspaceCalls.push(workspaceId);
@@ -100,14 +102,19 @@ class MemoryStorageRepository implements StorageRepository {
     return true;
   }
 
+  async wipeStorage(workspaceId: string) {
+    this.record(workspaceId);
+  }
+
   async searchSamples(workspaceId: string, input: SearchQuery): Promise<SampleSearchResult[]> {
     this.record(workspaceId);
     this.lastSearch = input;
     return [{
       recordId: SAMPLE_ID,
-      externalId: "CR-001",
       name: "Plasma 1",
       project: "OncoMap",
+      experimenter: "Dr Martin",
+      description: "Témoin",
       storedAt: "2026-09-19",
       position: 1,
       box: { id: BOX_ID, name: "Box 01" },
@@ -116,9 +123,10 @@ class MemoryStorageRepository implements StorageRepository {
     }];
   }
 
-  async exportSamples(workspaceId: string): Promise<SampleExportRow[]> {
+  async exportSamples(workspaceId: string, filter?: ExportSamplesQuery): Promise<SampleExportRow[]> {
     this.record(workspaceId);
-    return [{ externalId: "=1+1", name: "Plasma; témoin", project: "OncoMap", storedAt: "2026-09-19", freezer: "Freezer −80 °C", rack: "Rack A", box: "Box 01", position: 1 }];
+    this.lastExportFilter = filter;
+    return [{ name: "Plasma; témoin", project: "OncoMap", experimenter: "=Dr Martin", description: "Aliquote témoin", storedAt: "2026-09-19", freezer: "Freezer −80 °C", rack: "Rack A", box: "Box 01", position: 1 }];
   }
 
   private record(workspaceId: string) {
@@ -178,7 +186,7 @@ describe("workspace storage routes", () => {
   it("creates, edits, moves and deletes samples within the same workspace", async () => {
     const { app, repository, cookie } = await authenticatedApp();
     const requests = [
-      { method: "POST", url: `/api/boxes/${BOX_ID}/samples`, payload: { externalId: "CR-001", name: "Plasma 1", project: "OncoMap", storedAt: "2026-09-19", position: 1 }, status: 201 },
+      { method: "POST", url: `/api/boxes/${BOX_ID}/samples`, payload: { name: "Plasma 1", project: "OncoMap", experimenter: "Dr Martin", description: "Témoin", storedAt: "2026-09-19", position: 1 }, status: 201 },
       { method: "PATCH", url: `/api/samples/${SAMPLE_ID}`, payload: { name: "Plasma témoin" }, status: 204 },
       { method: "POST", url: `/api/samples/${SAMPLE_ID}/move`, payload: { boxId: BOX_ID, position: 64 }, status: 204 },
       { method: "DELETE", url: `/api/samples/${SAMPLE_ID}`, status: 204 }
@@ -210,13 +218,21 @@ describe("workspace storage routes", () => {
 
   it("exports an Excel-compatible CSV and neutralizes formulas", async () => {
     const { app, repository, cookie } = await authenticatedApp();
-    const response = await app.inject({ method: "GET", url: "/api/export/samples.csv", headers: { cookie } });
+    const response = await app.inject({ method: "GET", url: `/api/export/samples.csv?boxId=${BOX_ID}`, headers: { cookie } });
     expect(response.statusCode).toBe(200);
     expect(response.headers["content-type"]).toContain("text/csv");
     expect(response.headers["content-disposition"]).toContain("crio-samples.csv");
     expect(response.body.startsWith("\uFEFF")).toBe(true);
-    expect(response.body).toContain("\"'=1+1\"");
+    expect(response.body).toContain("\"'=Dr Martin\"");
     expect(response.body).toContain("\"Plasma; témoin\"");
+    expect(repository.lastExportFilter).toEqual({ boxId: BOX_ID });
+    expect(repository.workspaceCalls).toEqual([WORKSPACE_ID]);
+  });
+
+  it("wipes the storage hierarchy while keeping the authenticated workspace", async () => {
+    const { app, repository, cookie } = await authenticatedApp();
+    const response = await app.inject({ method: "DELETE", url: "/api/storage", headers: { cookie } });
+    expect(response.statusCode).toBe(204);
     expect(repository.workspaceCalls).toEqual([WORKSPACE_ID]);
   });
 });

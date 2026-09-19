@@ -7,7 +7,7 @@ function safeCell(value: string | number) {
 }
 
 export function renderSamplesCsv(rows: SampleExportRow[]) {
-  const header = ["Identifiant", "Nom", "Projet", "Date de stockage", "Freezer", "Rack", "Box", "Position"];
-  const lines = rows.map((row) => [row.externalId, row.name, row.project, row.storedAt, row.freezer, row.rack, row.box, row.position]);
+  const header = ["Nom", "Projet", "Expérimentateur", "Description", "Date de stockage", "Freezer", "Rack", "Box", "Position"];
+  const lines = rows.map((row) => [row.name, row.project, row.experimenter, row.description, row.storedAt, row.freezer, row.rack, row.box, row.position]);
   return `\uFEFF${[header, ...lines].map((line) => line.map(safeCell).join(";")).join("\r\n")}\r\n`;
 }

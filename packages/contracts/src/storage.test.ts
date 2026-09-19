@@ -37,7 +37,7 @@ describe("resolveLandingLevel", () => {
 
 describe("sample mutations", () => {
   it("accepts a complete sample and rejects position zero", () => {
-    const input = { externalId: "CR-001", name: "Plasma", project: "OncoMap", storedAt: "2026-09-19", position: 1 };
+    const input = { name: "Plasma", project: "OncoMap", experimenter: "Dr Martin", description: "Témoin", storedAt: "2026-09-19", position: 1 };
     expect(createSampleSchema.parse(input).position).toBe(1);
     expect(createSampleSchema.safeParse({ ...input, position: 0 }).success).toBe(false);
   });

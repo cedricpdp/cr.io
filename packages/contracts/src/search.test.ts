@@ -13,9 +13,10 @@ describe("search contracts", () => {
     const response = sampleSearchResponseSchema.parse({
       results: [{
         recordId: id,
-        externalId: "CR-001",
         name: "Plasma",
         project: "OncoMap",
+        experimenter: "Dr Martin",
+        description: "Témoin",
         storedAt: "2026-09-19",
         position: 1,
         box: { id, name: "Box 01" },

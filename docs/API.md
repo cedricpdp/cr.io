@@ -8,7 +8,8 @@ Toutes les routes métier exigent le cookie de session `crio_session`. Le worksp
 | `GET` | `/api/health` | Vérifier l’API et la connexion PostgreSQL |
 | `GET` | `/api/storage` | Hiérarchie complète du workspace |
 | `GET` | `/api/search?q=…&limit=…` | Rechercher des échantillons, maximum 50 résultats |
-| `GET` | `/api/export/samples.csv` | Exporter les échantillons du workspace |
+| `GET` | `/api/export/samples.csv` | Exporter les échantillons du workspace, avec filtres facultatifs `freezerId`, `rackId` ou `boxId` |
+| `DELETE` | `/api/storage` | Effacer toute la hiérarchie de stockage du workspace (owner/admin, temporaire pour les tests) |
 | `POST` | `/api/freezers` | Créer un freezer |
 | `PATCH` | `/api/freezers/:id` | Modifier un freezer |
 | `DELETE` | `/api/freezers/:id` | Supprimer un freezer et son contenu |
@@ -25,4 +26,4 @@ Toutes les routes métier exigent le cookie de session `crio_session`. Le worksp
 
 Les créations répondent `201`, les modifications et suppressions `204`. Les identifiants inconnus ou hors workspace répondent tous `404`, sans révéler l'existence d'une ressource appartenant à un autre workspace.
 
-La position d’un échantillon est un entier commençant à `1`, converti côté serveur en ligne et colonne selon les dimensions de la box. Un déplacement met à jour la box et les coordonnées dans une seule requête ; la contrainte PostgreSQL interdit toute double occupation.
+La position d’un échantillon est un entier commençant à `1` dans l’API, converti par l’interface depuis une coordonnée telle que `A7`, puis en ligne et colonne côté serveur selon les dimensions de la box. Un déplacement met à jour la box et les coordonnées dans une seule transaction ; la contrainte PostgreSQL interdit toute double occupation. Les créations, modifications et déplacements sont historisés avec le nom de l’utilisateur connecté.

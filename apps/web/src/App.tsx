@@ -13,6 +13,7 @@ import {
   type StorageSnapshot
 } from "../../../packages/contracts/src/index.js";
 import { createDemoStorage } from "./demo-storage.js";
+import { parsePositionLabel, positionLabel, rowLabel } from "./positions.js";
 import { isStandaloneApp, isStaticDemoHost, type InstallPromptEvent } from "./pwa.js";
 
 type ThemePreference = "system" | "light" | "dark";
@@ -44,15 +45,15 @@ function applyTheme(preference: ThemePreference) {
   document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')?.setAttribute("content", dark ? "#0d1317" : "#f4f7fa");
 }
 
-function positionLabel(position: number, columns = 8) {
-  return `${String.fromCharCode(65 + Math.floor((position - 1) / columns))}${((position - 1) % columns) + 1}`;
-}
-
 function landingView(snapshot: StorageSnapshot): View {
   const landing = resolveLandingLevel(snapshot);
   if (landing.level === "freezers") return { level: "freezers" };
   if (landing.level === "racks") return { level: "racks", freezerId: landing.freezer.id };
   return { level: "boxes", freezerId: landing.freezer.id, rackId: landing.rack.id };
+}
+
+function ExportAction({ href }: { href: string }) {
+  return <a className="secondary-button compact export-link" href={href} download>Exporter en CSV</a>;
 }
 
 function AuthView({ onAuthenticated }: { onAuthenticated: (session: AuthSession) => Promise<void> }) {
@@ -119,13 +120,13 @@ function AuthView({ onAuthenticated }: { onAuthenticated: (session: AuthSession)
   </section>;
 }
 
-function FreezersView({ snapshot, editable, onCreate, onOpen, onEdit, onDelete }: { snapshot: StorageSnapshot; editable: boolean; onCreate: () => void; onOpen: (freezer: Freezer) => void; onEdit: (freezer: Freezer) => void; onDelete: (freezer: Freezer) => void }) {
+function FreezersView({ snapshot, editable, canExport, onCreate, onOpen, onEdit, onDelete }: { snapshot: StorageSnapshot; editable: boolean; canExport: boolean; onCreate: () => void; onOpen: (freezer: Freezer) => void; onEdit: (freezer: Freezer) => void; onDelete: (freezer: Freezer) => void }) {
   return <section className="page">
     <div className="page-head">
       <div><span className="eyebrow">{snapshot.workspace.name}</span><h1>Vos freezers.</h1><p className="subtitle">Choisissez un freezer pour parcourir son contenu.</p></div>
       <div className="context"><i className="context-dot" />{snapshot.freezers.length} freezer{snapshot.freezers.length > 1 ? "s" : ""}</div>
     </div>
-    {editable && <div className="page-actions"><button className="primary-button compact" type="button" onClick={onCreate}>Ajouter un freezer</button></div>}
+    {(editable || canExport) && <div className="page-actions">{canExport && <ExportAction href="/api/export/samples.csv" />}{editable && <button className="primary-button compact" type="button" onClick={onCreate}>Ajouter un freezer</button>}</div>}
     {snapshot.freezers.length ? <div className="entity-grid">{snapshot.freezers.map((freezer) => {
       const boxCount = freezer.racks.reduce((sum, rack) => sum + rack.boxes.length, 0);
       return <article className="entity-card" key={freezer.id}>
@@ -136,16 +137,20 @@ function FreezersView({ snapshot, editable, onCreate, onOpen, onEdit, onDelete }
   </section>;
 }
 
-function RacksView({ snapshot, freezer, editable, onBack, onCreate, onOpen, onEdit, onDelete }: { snapshot: StorageSnapshot; freezer: Freezer; editable: boolean; onBack: () => void; onCreate: () => void; onOpen: (rack: Rack) => void; onEdit: (rack: Rack) => void; onDelete: (rack: Rack) => void }) {
+function RacksView({ snapshot, freezer, editable, canExport, onBack, onCreate, onOpen, onEdit, onDelete }: { snapshot: StorageSnapshot; freezer: Freezer; editable: boolean; canExport: boolean; onBack: () => void; onCreate: () => void; onOpen: (rack: Rack) => void; onEdit: (rack: Rack) => void; onDelete: (rack: Rack) => void }) {
   return <section className="page">
     <button className="back" type="button" onClick={onBack}>‹ Freezers</button>
     <div className="page-head">
       <div><span className="eyebrow">{snapshot.workspace.name}</span><h1>{freezer.name}</h1><p className="subtitle">Sélectionnez le rack que vous souhaitez consulter.</p></div>
       <div className="context">{freezer.temperatureCelsius} °C · {freezer.racks.length} racks</div>
     </div>
-    {editable && <div className="page-actions"><button className="primary-button compact" type="button" onClick={onCreate}>Ajouter un rack</button></div>}
+    {(editable || canExport) && <div className="page-actions">{canExport && <ExportAction href={`/api/export/samples.csv?freezerId=${freezer.id}`} />}{editable && <button className="primary-button compact" type="button" onClick={onCreate}>Ajouter un rack</button>}</div>}
     {freezer.racks.length ? <div className="entity-grid">{freezer.racks.map((rack) => <article className="entity-card" key={rack.id}>
-      <button className="entity-open" type="button" onClick={() => onOpen(rack)}><span className="eyebrow">Rack</span><h2>{rack.name}</h2><p>{rack.boxes.length} box{rack.boxes.length > 1 ? "es" : ""}</p></button>
+      <button className="entity-open" type="button" onClick={() => onOpen(rack)}><span className="eyebrow">Rack</span><h2>{rack.name}</h2>{rack.boxes.length ? <ul className="rack-box-list">{rack.boxes.map((box) => {
+        const capacity = box.rows * box.columns;
+        const fillRate = capacity ? Math.round(box.samples.length / capacity * 100) : 0;
+        return <li key={box.id}><span><strong>{box.name}</strong>{box.project && <small>{box.project}</small>}</span><span>{box.samples.length}/{capacity} · {fillRate}%</span></li>;
+      })}</ul> : <p>Aucune box</p>}</button>
       {editable && <div className="card-actions"><button type="button" onClick={() => onEdit(rack)}>Modifier</button><button className="danger-link" type="button" onClick={() => onDelete(rack)}>Supprimer</button></div>}
     </article>)}</div> : <div className="empty-state"><h2>Aucun rack</h2><p>Ajoutez le premier rack de ce freezer.</p></div>}
   </section>;
@@ -158,7 +163,7 @@ function BoxCard({ box, onOpen, onEdit, onDelete, editable }: { box: StorageBox;
   return <div className="box-card-wrap">
     <button className="box-card" type="button" onClick={onOpen}>
       <div className="box-card-head">
-        <div><h3>{box.name}</h3><small>{box.rows} × {box.columns} positions</small></div>
+        <div><h3>{box.name}</h3><small>{box.project ? `${box.project} · ` : ""}{box.rows} × {box.columns} positions</small></div>
         <span className="pill">{box.samples.length}/{capacity}</span>
       </div>
       <div className="mini-grid" style={{ gridTemplateColumns: `repeat(${box.columns}, 1fr)` }} aria-hidden="true">
@@ -169,7 +174,7 @@ function BoxCard({ box, onOpen, onEdit, onDelete, editable }: { box: StorageBox;
   </div>;
 }
 
-function BoxesView({ snapshot, freezer, rack, editable, onBack, onCreate, onOpenBox, onEditBox, onDeleteBox }: { snapshot: StorageSnapshot; freezer: Freezer; rack: Rack; editable: boolean; onBack: () => void; onCreate: () => void; onOpenBox: (box: StorageBox) => void; onEditBox: (box: StorageBox) => void; onDeleteBox: (box: StorageBox) => void }) {
+function BoxesView({ snapshot, freezer, rack, editable, canExport, onBack, onCreate, onOpenBox, onEditBox, onDeleteBox }: { snapshot: StorageSnapshot; freezer: Freezer; rack: Rack; editable: boolean; canExport: boolean; onBack: () => void; onCreate: () => void; onOpenBox: (box: StorageBox) => void; onEditBox: (box: StorageBox) => void; onDeleteBox: (box: StorageBox) => void }) {
   const total = rack.boxes.reduce((sum, box) => sum + box.samples.length, 0);
   const capacity = rack.boxes.reduce((sum, box) => sum + box.rows * box.columns, 0);
 
@@ -183,7 +188,7 @@ function BoxesView({ snapshot, freezer, rack, editable, onBack, onCreate, onOpen
       </div>
       <div className="context"><i className="context-dot" />{freezer.name} <span>·</span> {rack.name}</div>
     </div>
-    {editable && <div className="page-actions"><button className="primary-button compact" type="button" onClick={onCreate}>Ajouter une box</button></div>}
+    {(editable || canExport) && <div className="page-actions">{canExport && <ExportAction href={`/api/export/samples.csv?rackId=${rack.id}`} />}{editable && <button className="primary-button compact" type="button" onClick={onCreate}>Ajouter une box</button>}</div>}
     <div className="metrics">
       <div className="metric"><strong>{rack.boxes.length}</strong><span>boxes</span></div>
       <div className="metric"><strong>{total}</strong><span>échantillons</span></div>
@@ -193,12 +198,19 @@ function BoxesView({ snapshot, freezer, rack, editable, onBack, onCreate, onOpen
   </section>;
 }
 
-function BoxView({ location, selectedPosition, editable, onBack, onSelect, onCreate, onEdit, onMove, onDelete }: { location: Required<Location>; selectedPosition: number | null; editable: boolean; onBack: () => void; onSelect: (position: number) => void; onCreate: (position: number) => void; onEdit: (sample: Sample) => void; onMove: (sample: Sample) => void; onDelete: (sample: Sample) => void }) {
+function BoxView({ location, selectedPosition, editable, canExport, onBack, onSelect, onCreate, onEdit, onMove, onDelete }: { location: Required<Location>; selectedPosition: number | null; editable: boolean; canExport: boolean; onBack: () => void; onSelect: (position: number) => void; onCreate: (position: number) => void; onEdit: (sample: Sample) => void; onMove: (sample: Sample) => void; onDelete: (sample: Sample) => void }) {
   const { freezer, rack, box } = location;
   const capacity = box.rows * box.columns;
   const samplesByPosition = new Map(box.samples.map((sample) => [sample.position, sample]));
   const selectedSample = selectedPosition ? samplesByPosition.get(selectedPosition) : undefined;
   const firstFreePosition = Array.from({ length: capacity }, (_, index) => index + 1).find((position) => !samplesByPosition.has(position));
+  const addPosition = selectedPosition && !samplesByPosition.has(selectedPosition) ? selectedPosition : firstFreePosition;
+
+  function openCell(position: number, sample?: Sample) {
+    if (!editable) return;
+    if (sample) onEdit(sample);
+    else onCreate(position);
+  }
 
   return <section className="page">
     <button className="back" type="button" onClick={onBack}>‹ Boxes</button>
@@ -210,13 +222,13 @@ function BoxView({ location, selectedPosition, editable, onBack, onSelect, onCre
       </div>
       <div className="context">{box.samples.length} occupées · {capacity - box.samples.length} libres</div>
     </div>
-    {editable && firstFreePosition && <div className="page-actions"><button className="primary-button compact" type="button" onClick={() => onCreate(firstFreePosition)}>Ajouter un échantillon</button></div>}
+    {(editable || canExport) && <div className="page-actions">{canExport && <ExportAction href={`/api/export/samples.csv?boxId=${box.id}`} />}{editable && addPosition && <button className="primary-button compact" type="button" onClick={() => onCreate(addPosition)}>Ajouter un échantillon</button>}</div>}
     <div className="sample-grid-wrap">
       <div className="sample-grid" style={{ gridTemplateColumns: `34px repeat(${box.columns}, minmax(60px, 1fr))` }}>
         <span />
         {Array.from({ length: box.columns }, (_, index) => <span key={index} className="grid-label">{index + 1}</span>)}
         {Array.from({ length: box.rows }, (_, row) => {
-          const letter = String.fromCharCode(65 + row);
+          const letter = rowLabel(row);
           return <div key={letter} style={{ display: "contents" }}>
             <span className="grid-label">{letter}</span>
             {Array.from({ length: box.columns }, (_, column) => {
@@ -227,6 +239,12 @@ function BoxView({ location, selectedPosition, editable, onBack, onSelect, onCre
                 className={`sample-cell ${sample ? "occupied" : ""} ${selectedPosition === position ? "selected" : ""}`}
                 type="button"
                 onClick={() => onSelect(position)}
+                onDoubleClick={() => openCell(position, sample)}
+                onPointerUp={(event) => {
+                  if (event.pointerType === "mouse") return;
+                  onSelect(position);
+                  openCell(position, sample);
+                }}
                 aria-label={`${letter}${column + 1}${sample ? `, ${sample.name}` : ", vide"}`}
               >
                 {sample ? <><span className="cell-code">{letter}{column + 1}</span><span className="cell-name">{sample.name}</span></> : <span className="empty-mark">·</span>}
@@ -240,9 +258,10 @@ function BoxView({ location, selectedPosition, editable, onBack, onSelect, onCre
     {selectedPosition && <div className="sample-panel">
       <div><span className="eyebrow">{selectedSample ? positionLabel(selectedPosition, box.columns) : "Position libre"}</span><h2>{selectedSample?.name ?? "Emplacement disponible"}</h2></div>
       {selectedSample ? <><dl>
-        <div><dt>Identifiant</dt><dd>{selectedSample.id}</dd></div>
         <div><dt>Projet</dt><dd>{selectedSample.project}</dd></div>
+        <div><dt>Expérimentateur</dt><dd>{selectedSample.experimenter || "—"}</dd></div>
         <div><dt>Stocké le</dt><dd>{new Date(`${selectedSample.date}T00:00:00`).toLocaleDateString("fr-FR")}</dd></div>
+        <div className="sample-description"><dt>Description</dt><dd>{selectedSample.description || "—"}</dd></div>
       </dl>{editable && selectedSample.recordId && <div className="sample-panel-actions"><button type="button" onClick={() => onEdit(selectedSample)}>Modifier</button><button type="button" onClick={() => onMove(selectedSample)}>Déplacer</button><button className="danger-link" type="button" onClick={() => onDelete(selectedSample)}>Supprimer</button></div>}</> : <div className="sample-panel-actions"><span className="pill">{positionLabel(selectedPosition, box.columns)}</span>{editable && <button type="button" onClick={() => onCreate(selectedPosition)}>Ajouter ici</button>}</div>}
     </div>}
   </section>;
@@ -265,7 +284,7 @@ function EntityEditor({ state, onClose, onSaved }: { state: EditorState; onClose
       ? { name: values.get("name"), temperatureCelsius: Number(values.get("temperatureCelsius")) }
       : state.kind === "rack"
         ? { name: values.get("name") }
-        : { name: values.get("name"), rows: Number(values.get("rows")), columns: Number(values.get("columns")) };
+        : { name: values.get("name"), project: values.get("project"), rows: Number(values.get("rows")), columns: Number(values.get("columns")) };
     const endpoint = state.kind === "freezer"
       ? entity ? `/api/freezers/${entity.id}` : "/api/freezers"
       : state.kind === "rack"
@@ -299,7 +318,7 @@ function EntityEditor({ state, onClose, onSaved }: { state: EditorState; onClose
       <form className="auth-form" onSubmit={(event) => void submit(event)}>
         <label>Nom<input name="name" required maxLength={120} defaultValue={entity?.name ?? ""} autoFocus /></label>
         {state.kind === "freezer" && <label>Température (°C)<input name="temperatureCelsius" type="number" min={-196} max={30} required defaultValue={state.entity?.temperatureCelsius ?? -80} /></label>}
-        {state.kind === "box" && <div className="form-columns"><label>Lignes<input name="rows" type="number" min={1} max={32} required defaultValue={state.entity?.rows ?? 8} /></label><label>Colonnes<input name="columns" type="number" min={1} max={32} required defaultValue={state.entity?.columns ?? 8} /></label></div>}
+        {state.kind === "box" && <><label>Projet<input name="project" maxLength={160} defaultValue={state.entity?.project ?? ""} placeholder="Projet associé à cette box" /></label><div className="form-columns"><label>Lignes<input name="rows" type="number" min={1} max={32} required defaultValue={state.entity?.rows ?? 8} /></label><label>Colonnes<input name="columns" type="number" min={1} max={32} required defaultValue={state.entity?.columns ?? 8} /></label></div></>}
         {error && <div className="form-error" role="alert">{error}</div>}
         <button className="primary-button" type="submit" disabled={submitting}>{submitting ? "Enregistrement…" : "Enregistrer"}</button>
       </form>
@@ -311,6 +330,7 @@ function SampleEditor({ state, snapshot, onClose, onSaved }: { state: SampleEdit
   const dialog = useRef<HTMLDialogElement>(null);
   const sample = state.mode === "create" ? undefined : state.sample;
   const [targetBoxId, setTargetBoxId] = useState(state.box.id);
+  const [movePosition, setMovePosition] = useState(sample ? positionLabel(sample.position, state.box.columns) : "A1");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const boxes = snapshot.freezers.flatMap((freezer) => freezer.racks.flatMap((rack) => rack.boxes.map((box) => ({ freezer, rack, box }))));
@@ -323,14 +343,21 @@ function SampleEditor({ state, snapshot, onClose, onSaved }: { state: SampleEdit
     setSubmitting(true);
     setError("");
     const values = new FormData(event.currentTarget);
-    const position = state.mode === "create" ? state.position : state.mode === "move" ? Number(values.get("position")) : state.sample.position;
+    const moveTarget = state.mode === "move" ? parsePositionLabel(movePosition, targetBox.rows, targetBox.columns) : undefined;
+    if (state.mode === "move" && moveTarget === undefined) {
+      setError(`Saisissez une position valide entre A1 et ${positionLabel(targetBox.rows * targetBox.columns, targetBox.columns)}.`);
+      setSubmitting(false);
+      return;
+    }
+    const position = state.mode === "create" ? state.position : state.mode === "move" ? moveTarget! : state.sample.position;
     const boxId = state.mode === "move" ? String(values.get("boxId")) : state.box.id;
     const payload = state.mode === "move"
       ? { boxId, position }
       : {
-          externalId: values.get("externalId"),
           name: values.get("name"),
           project: values.get("project"),
+          experimenter: values.get("experimenter"),
+          description: values.get("description"),
           storedAt: values.get("storedAt"),
           ...(state.mode === "create" ? { position } : {})
         };
@@ -360,17 +387,19 @@ function SampleEditor({ state, snapshot, onClose, onSaved }: { state: SampleEdit
       <form className="auth-form" onSubmit={(event) => void submit(event)}>
         {state.mode === "move" ? <>
           <label>Box<select name="boxId" value={targetBoxId} onChange={(event) => setTargetBoxId(event.target.value)}>{boxes.map(({ freezer, rack, box }) => <option key={box.id} value={box.id}>{freezer.name} · {rack.name} · {box.name}</option>)}</select></label>
-          <label>Position<input name="position" type="number" min={1} max={targetBox.rows * targetBox.columns} required defaultValue={sample?.position ?? 1} /></label>
-          <small>Positions 1 à {targetBox.rows * targetBox.columns} pour une grille {targetBox.rows} × {targetBox.columns}.</small>
+          <label>Position<input name="position" required value={movePosition} onChange={(event) => setMovePosition(event.target.value)} placeholder="A7" autoCapitalize="characters" autoFocus /></label>
+          <small>Coordonnées de A1 à {positionLabel(targetBox.rows * targetBox.columns, targetBox.columns)} pour une grille {targetBox.rows} × {targetBox.columns}.</small>
         </> : <>
-          <label>Identifiant<input name="externalId" required maxLength={120} defaultValue={sample?.id ?? ""} autoFocus /></label>
-          <label>Nom<input name="name" required maxLength={160} defaultValue={sample?.name ?? ""} /></label>
-          <label>Projet<input name="project" required maxLength={160} defaultValue={sample?.project ?? ""} /></label>
+          <label>Nom<input name="name" required maxLength={160} defaultValue={sample?.name ?? ""} autoFocus /></label>
+          <label>Projet<input name="project" required maxLength={160} defaultValue={sample?.project ?? state.box.project} /></label>
+          <label>Expérimentateur<input name="experimenter" maxLength={160} defaultValue={sample?.experimenter ?? ""} /></label>
+          <label>Description<textarea name="description" maxLength={2000} rows={4} defaultValue={sample?.description ?? ""} /></label>
           <label>Date de stockage<input name="storedAt" type="date" required defaultValue={sample?.date ?? new Date().toISOString().slice(0, 10)} /></label>
         </>}
         {error && <div className="form-error" role="alert">{error}</div>}
         <button className="primary-button" type="submit" disabled={submitting}>{submitting ? "Enregistrement…" : state.mode === "move" ? "Déplacer" : "Enregistrer"}</button>
       </form>
+      {state.mode === "edit" && <section className="sample-history"><h3>Historique</h3>{state.sample.history.length ? <ol>{state.sample.history.map((entry) => <li key={entry.id}><span className={`history-action ${entry.action}`}>{entry.action === "created" ? "Création" : entry.action === "moved" ? "Déplacement" : "Modification"}</span><strong>{entry.actorName}</strong><p>{entry.details}</p><time dateTime={entry.createdAt}>{new Date(entry.createdAt).toLocaleString("fr-FR")}</time></li>)}</ol> : <p className="empty-history">Aucune trace enregistrée pour cet échantillon.</p>}</section>}
     </div>
   </dialog>;
 }
@@ -491,7 +520,7 @@ export function App() {
     if (!snapshot) return [];
     const normalized = query.trim().toLocaleLowerCase("fr");
     return snapshot.freezers.flatMap((freezer) => freezer.racks.flatMap((rack) => rack.boxes.flatMap((box) => box.samples
-      .filter((sample) => !normalized || [sample.id, sample.name, sample.project, box.name].some((value) => value.toLocaleLowerCase("fr").includes(normalized)))
+      .filter((sample) => !normalized || [sample.name, sample.project, sample.experimenter, sample.description, box.name].some((value) => value.toLocaleLowerCase("fr").includes(normalized)))
       .map((sample) => ({ freezer, rack, box, sample })))))
       .slice(0, normalized ? 12 : 5);
   }, [query, snapshot]);
@@ -566,6 +595,19 @@ export function App() {
     await loadStorage({ boxId: box.id, position: sample.position });
   }
 
+  async function wipeStorage() {
+    if (!window.confirm("Effacer tous les freezers, racks, boxes et échantillons de cet espace ? Cette action est irréversible.")) return;
+    const response = await fetch("/api/storage", { method: "DELETE" });
+    if (!response.ok) {
+      const body: unknown = await response.json();
+      window.alert(typeof body === "object" && body !== null && "message" in body ? String(body.message) : "Effacement impossible.");
+      return;
+    }
+    settingsDialog.current?.close();
+    setSelectedPosition(null);
+    await loadStorage();
+  }
+
   async function handleAuthenticated(session: AuthSession) {
     setAuthSession(session);
     await loadStorage();
@@ -616,6 +658,7 @@ export function App() {
           : view.level === "freezers" ? <FreezersView
               snapshot={snapshot}
               editable={editable}
+              canExport={mode === "authenticated"}
               onCreate={() => setEditor({ kind: "freezer" })}
               onOpen={(freezer) => setView(freezer.racks.length === 1 ? { level: "boxes", freezerId: freezer.id, rackId: freezer.racks[0]!.id } : { level: "racks", freezerId: freezer.id })}
               onEdit={(freezer) => setEditor({ kind: "freezer", entity: freezer })}
@@ -625,6 +668,7 @@ export function App() {
                 snapshot={snapshot}
                 freezer={currentFreezer}
                 editable={editable}
+                canExport={mode === "authenticated"}
                 onBack={() => setView({ level: "freezers" })}
                 onCreate={() => setEditor({ kind: "rack", freezer: currentFreezer })}
                 onOpen={(rack) => setView({ level: "boxes", freezerId: currentFreezer.id, rackId: rack.id })}
@@ -636,6 +680,7 @@ export function App() {
                   freezer={currentFreezer}
                   rack={currentRack}
                   editable={editable}
+                  canExport={mode === "authenticated"}
                   onBack={() => setView({ level: "racks", freezerId: currentFreezer.id })}
                   onCreate={() => setEditor({ kind: "box", freezer: currentFreezer, rack: currentRack })}
                   onOpenBox={(box) => { setView({ level: "box", freezerId: currentFreezer.id, rackId: currentRack.id, boxId: box.id }); setSelectedPosition(null); }}
@@ -646,6 +691,7 @@ export function App() {
                     location={{ freezer: currentFreezer, rack: currentRack, box: currentBox }}
                     selectedPosition={selectedPosition}
                     editable={editable}
+                    canExport={mode === "authenticated"}
                     onBack={() => { setView({ level: "boxes", freezerId: currentFreezer.id, rackId: currentRack.id }); setSelectedPosition(null); }}
                     onSelect={setSelectedPosition}
                     onCreate={(position) => setSampleEditor({ mode: "create", box: currentBox, position })}
@@ -662,8 +708,8 @@ export function App() {
     <dialog ref={searchDialog} className="dialog search-dialog" onClose={() => setSearchOpen(false)}>
       <div className="dialog-shell">
         <div className="dialog-head"><div><span className="eyebrow">Recherche globale</span><h2>Retrouver un échantillon</h2></div><button className="icon-button" type="button" onClick={() => searchDialog.current?.close()} aria-label="Fermer">×</button></div>
-        <label className="search-field"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m21 21-4.35-4.35m2.35-5.65a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z" /></svg><input ref={searchInput} type="search" autoComplete="off" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nom, identifiant, projet…" /></label>
-        <div className="search-results" aria-live="polite">{searching ? <div className="empty-results">Recherche…</div> : results.length ? results.map((result) => <button className="result" type="button" key={result.sample.recordId ?? `${result.box.id}-${result.sample.position}`} onClick={() => openResult(result)}><span><strong>{result.sample.name}</strong><br /><small>{result.sample.id} · {result.sample.project}</small></span><small>{result.box.name} / {positionLabel(result.sample.position, result.box.columns)}</small></button>) : <div className="empty-results">Aucun échantillon trouvé.</div>}</div>
+        <label className="search-field"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m21 21-4.35-4.35m2.35-5.65a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z" /></svg><input ref={searchInput} type="search" autoComplete="off" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nom, projet, expérimentateur…" /></label>
+        <div className="search-results" aria-live="polite">{searching ? <div className="empty-results">Recherche…</div> : results.length ? results.map((result) => <button className="result" type="button" key={result.sample.recordId ?? `${result.box.id}-${result.sample.position}`} onClick={() => openResult(result)}><span><strong>{result.sample.name}</strong><br /><small>{result.sample.project}{result.sample.experimenter ? ` · ${result.sample.experimenter}` : ""}</small></span><small>{result.box.name} / {positionLabel(result.sample.position, result.box.columns)}</small></button>) : <div className="empty-results">Aucun échantillon trouvé.</div>}</div>
       </div>
     </dialog>
 
@@ -673,9 +719,10 @@ export function App() {
         {authSession && <div className="account-summary"><strong>{authSession.user.displayName}</strong><span>{authSession.user.email}</span><small>{authSession.workspace.name} · {authSession.workspace.role}</small></div>}
         <fieldset className="theme-options"><legend>Thème</legend>{(["system", "light", "dark"] as const).map((value) => <label key={value}><input type="radio" name="theme" value={value} checked={theme === value} onChange={() => setTheme(value)} /><span>{{ system: "Système", light: "Clair", dark: "Sombre" }[value]}</span></label>)}</fieldset>
         {authSession && <a className="secondary-button export-link" href="/api/export/samples.csv" download>Télécharger l’export CSV</a>}
+        {editable && <button className="secondary-button danger-button" type="button" onClick={() => void wipeStorage()}>Effacer toutes les données de test</button>}
         {installPrompt && !isStandaloneApp() && <button className="secondary-button" type="button" onClick={() => void installApp()}>Installer cr.io sur cet appareil</button>}
         {authSession && <button className="secondary-button" type="button" onClick={() => void logout()}>Se déconnecter</button>}
-        <div className="about"><strong>cr.io</strong><span>Version 0.7.2 · hébergement gratuit prêt</span></div>
+        <div className="about"><strong>cr.io</strong><span>Version 0.8.0 · hébergement gratuit prêt</span></div>
       </div>
     </dialog>
   </>;

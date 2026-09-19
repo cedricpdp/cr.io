@@ -11,7 +11,7 @@ describe("cr.io API", () => {
     apps.push(app);
     const response = await app.inject({ method: "GET", url: "/api/live" });
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ status: "ok", version: "0.7.2" });
+    expect(response.json()).toEqual({ status: "ok", version: "0.8.0" });
   });
 
   it("reports a healthy API without requiring a local database", async () => {

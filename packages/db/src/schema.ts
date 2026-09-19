@@ -70,6 +70,7 @@ export const boxes = pgTable("boxes", {
   id: uuid("id").primaryKey().defaultRandom(),
   rackId: uuid("rack_id").notNull().references(() => racks.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
+  project: text("project").notNull().default(""),
   position: integer("position").notNull(),
   rows: integer("rows").notNull().default(8),
   columns: integer("columns").notNull().default(8),
@@ -85,19 +86,33 @@ export const samples = pgTable("samples", {
   id: uuid("id").primaryKey().defaultRandom(),
   workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
   boxId: uuid("box_id").notNull().references(() => boxes.id, { onDelete: "cascade" }),
-  externalId: text("external_id").notNull(),
   name: text("name").notNull(),
   project: text("project").notNull(),
+  experimenter: text("experimenter").notNull().default(""),
+  description: text("description").notNull().default(""),
   row: integer("row").notNull(),
   column: integer("column").notNull(),
   storedAt: timestamp("stored_at", { withTimezone: true }).notNull().defaultNow(),
   ...timestamps
 }, (table) => [
-  uniqueIndex("samples_workspace_external_id_unique").on(table.workspaceId, table.externalId),
   uniqueIndex("samples_box_position_unique").on(table.boxId, table.row, table.column),
   index("samples_workspace_name_idx").on(table.workspaceId, table.name),
   check("samples_row_positive", sql`${table.row} > 0`),
   check("samples_column_positive", sql`${table.column} > 0`)
+]);
+
+export const sampleHistory = pgTable("sample_history", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  sampleId: uuid("sample_id").notNull().references(() => samples.id, { onDelete: "cascade" }),
+  workspaceId: uuid("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  actorUserId: uuid("actor_user_id").references(() => users.id, { onDelete: "set null" }),
+  actorName: text("actor_name").notNull(),
+  action: text("action").notNull(),
+  details: text("details").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+}, (table) => [
+  index("sample_history_sample_created_idx").on(table.sampleId, table.createdAt),
+  index("sample_history_workspace_idx").on(table.workspaceId)
 ]);
 
 export const sessions = pgTable("sessions", {

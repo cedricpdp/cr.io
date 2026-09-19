@@ -2,16 +2,25 @@ import { z } from "zod";
 
 export const sampleSchema = z.object({
   recordId: z.uuid().optional(),
-  id: z.string().min(1),
   name: z.string().min(1),
   project: z.string().min(1),
+  experimenter: z.string(),
+  description: z.string(),
   date: z.iso.date(),
-  position: z.number().int().min(1)
+  position: z.number().int().min(1),
+  history: z.array(z.object({
+    id: z.uuid(),
+    actorName: z.string().min(1),
+    action: z.enum(["created", "updated", "moved"]),
+    details: z.string().min(1),
+    createdAt: z.iso.datetime()
+  })).default([])
 });
 
 export const boxSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
+  project: z.string(),
   rows: z.number().int().positive(),
   columns: z.number().int().positive(),
   samples: z.array(sampleSchema)
@@ -66,6 +75,7 @@ export const updateRackSchema = z.object({
 
 export const createBoxSchema = z.object({
   name: entityNameSchema,
+  project: z.string().trim().max(160).default(""),
   position: positionSchema.optional(),
   rows: z.number().int().min(1).max(32).default(8),
   columns: z.number().int().min(1).max(32).default(8)
@@ -73,6 +83,7 @@ export const createBoxSchema = z.object({
 
 export const updateBoxSchema = z.object({
   name: entityNameSchema.optional(),
+  project: z.string().trim().max(160).optional(),
   position: positionSchema.optional(),
   rows: z.number().int().min(1).max(32).optional(),
   columns: z.number().int().min(1).max(32).optional()
@@ -85,23 +96,31 @@ export const rackIdParamsSchema = z.object({ rackId: z.uuid() });
 export const mutationResultSchema = z.object({ id: z.uuid() });
 
 export const createSampleSchema = z.object({
-  externalId: z.string().trim().min(1).max(120),
   name: z.string().trim().min(1).max(160),
   project: z.string().trim().min(1).max(160),
+  experimenter: z.string().trim().max(160).default(""),
+  description: z.string().trim().max(2000).default(""),
   storedAt: z.iso.date(),
   position: positionSchema
 });
 
 export const updateSampleSchema = z.object({
-  externalId: z.string().trim().min(1).max(120).optional(),
   name: z.string().trim().min(1).max(160).optional(),
   project: z.string().trim().min(1).max(160).optional(),
+  experimenter: z.string().trim().max(160).optional(),
+  description: z.string().trim().max(2000).optional(),
   storedAt: z.iso.date().optional()
 }).refine((value) => Object.keys(value).length > 0, "Au moins un champ est requis.");
 
 export const moveSampleSchema = z.object({
   boxId: z.uuid(),
   position: positionSchema
+});
+
+export const exportSamplesQuerySchema = z.object({
+  freezerId: z.uuid().optional(),
+  rackId: z.uuid().optional(),
+  boxId: z.uuid().optional()
 });
 
 export const boxIdParamsSchema = z.object({ boxId: z.uuid() });
@@ -121,6 +140,7 @@ export type UpdateBox = z.infer<typeof updateBoxSchema>;
 export type CreateSample = z.infer<typeof createSampleSchema>;
 export type UpdateSample = z.infer<typeof updateSampleSchema>;
 export type MoveSample = z.infer<typeof moveSampleSchema>;
+export type ExportSamplesQuery = z.infer<typeof exportSamplesQuerySchema>;
 
 export type LandingLevel =
   | { level: "freezers" }

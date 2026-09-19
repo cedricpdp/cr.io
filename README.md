@@ -41,7 +41,7 @@ pnpm db:migrate
 
 ## État
 
-Version `0.7.2` : application installable sur mobile et ordinateur, shell hors connexion sans mise en cache des données de laboratoire, migrations Drizzle vérifiées, image Docker publiée automatiquement et déploiements Render gratuit ou Docker Compose prêts à l’emploi. GitHub Pages reste la vitrine statique avec données de démonstration.
+Version `0.8.0` : édition rapide des cases sur ordinateur et mobile, coordonnées lisibles (`A7`), informations expérimentateur/description, historique nominatif des modifications, projet associé aux boxes, exports CSV contextuels et remise à zéro temporaire des données de test. L’application reste installable, déployable automatiquement et isolée par workspace.
 
 - [Déployer gratuitement sur Render](https://render.com/deploy?repo=https://github.com/cedricpdp/cr.io)
 - Documentation : [`hébergement gratuit`](docs/FREE-HOSTING.md), [`déploiement Docker`](docs/DEPLOYMENT.md) et [`API`](docs/API.md).

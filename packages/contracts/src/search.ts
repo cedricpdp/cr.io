@@ -7,9 +7,10 @@ export const searchQuerySchema = z.object({
 
 export const sampleSearchResultSchema = z.object({
   recordId: z.uuid(),
-  externalId: z.string(),
   name: z.string(),
   project: z.string(),
+  experimenter: z.string(),
+  description: z.string(),
   storedAt: z.iso.date(),
   position: z.number().int().positive(),
   box: z.object({ id: z.uuid(), name: z.string() }),

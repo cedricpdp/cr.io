@@ -7,6 +7,7 @@ import {
   createRackSchema,
   createSampleSchema,
   entityIdParamsSchema,
+  exportSamplesQuerySchema,
   freezerIdParamsSchema,
   moveSampleSchema,
   rackIdParamsSchema,
@@ -43,7 +44,7 @@ async function workspaceFor(request: FastifyRequest, reply: FastifyReply, authSe
     void reply.code(401).send({ error: "unauthorized", message: "Connexion requise." });
     return undefined;
   }
-  return session.workspace;
+  return { ...session.workspace, user: session.user };
 }
 
 function parse<T>(schema: ZodType<T>, value: unknown, reply: FastifyReply): T | undefined {
@@ -63,7 +64,7 @@ async function mutation(reply: FastifyReply, operation: () => Promise<string | b
     if (typeof result === "string") return reply.code(201).send({ id: result });
     return reply.code(204).send();
   } catch (error) {
-    if (error instanceof StorageConflictError) return reply.code(409).send({ error: "conflict", message: "Ce nom, cet identifiant ou cette position est déjà utilisé." });
+    if (error instanceof StorageConflictError) return reply.code(409).send({ error: "conflict", message: "Ce nom ou cette position est déjà utilisé." });
     if (error instanceof StoragePositionError) return reply.code(400).send({ error: "invalid_position", message: "La position est incompatible avec les dimensions de la box." });
     throw error;
   }
@@ -91,12 +92,23 @@ export const storageRoutes: FastifyPluginAsync<StorageRoutesOptions> = async (ap
     if (!options.repository || !options.authService) return unavailable(reply);
     const workspace = await workspaceFor(request, reply, options.authService);
     if (!workspace) return;
-    const csv = renderSamplesCsv(await options.repository.exportSamples(workspace.id));
+    const filter = parse(exportSamplesQuerySchema, request.query, reply);
+    if (!filter) return;
+    const csv = renderSamplesCsv(await options.repository.exportSamples(workspace.id, filter));
     return reply
       .header("content-type", "text/csv; charset=utf-8")
       .header("content-disposition", 'attachment; filename="crio-samples.csv"')
       .header("cache-control", "no-store")
       .send(csv);
+  });
+
+  app.delete("/storage", async (request, reply) => {
+    if (!options.repository || !options.authService) return unavailable(reply);
+    const workspace = await workspaceFor(request, reply, options.authService);
+    if (!workspace) return;
+    if (workspace.role !== "owner" && workspace.role !== "admin") return reply.code(403).send({ error: "forbidden", message: "Droits administrateur requis." });
+    await options.repository.wipeStorage(workspace.id);
+    return reply.code(204).send();
   });
 
   app.post("/freezers", async (request, reply) => {
@@ -198,7 +210,7 @@ export const storageRoutes: FastifyPluginAsync<StorageRoutesOptions> = async (ap
     if (!params) return;
     const input = parse(createSampleSchema, request.body, reply);
     if (!input) return;
-    return mutation(reply, () => options.repository!.createSample(workspace.id, params.boxId, input));
+    return mutation(reply, () => options.repository!.createSample(workspace.id, params.boxId, input, { userId: workspace.user.id, displayName: workspace.user.displayName }));
   });
 
   app.patch("/samples/:id", async (request, reply) => {
@@ -209,7 +221,7 @@ export const storageRoutes: FastifyPluginAsync<StorageRoutesOptions> = async (ap
     if (!params) return;
     const input = parse(updateSampleSchema, request.body, reply);
     if (!input) return;
-    return mutation(reply, () => options.repository!.updateSample(workspace.id, params.id, input));
+    return mutation(reply, () => options.repository!.updateSample(workspace.id, params.id, input, { userId: workspace.user.id, displayName: workspace.user.displayName }));
   });
 
   app.post("/samples/:id/move", async (request, reply) => {
@@ -220,7 +232,7 @@ export const storageRoutes: FastifyPluginAsync<StorageRoutesOptions> = async (ap
     if (!params) return;
     const input = parse(moveSampleSchema, request.body, reply);
     if (!input) return;
-    return mutation(reply, () => options.repository!.moveSample(workspace.id, params.id, input));
+    return mutation(reply, () => options.repository!.moveSample(workspace.id, params.id, input, { userId: workspace.user.id, displayName: workspace.user.displayName }));
   });
 
   app.delete("/samples/:id", async (request, reply) => {
