@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "../../../styles.css";
 import { App } from "./App.js";
+import { registerServiceWorker } from "./pwa.js";
 
 const root = document.querySelector<HTMLDivElement>("#root");
 
@@ -12,3 +13,5 @@ createRoot(root).render(
     <App />
   </StrictMode>
 );
+
+void registerServiceWorker();

@@ -41,7 +41,7 @@ export async function buildApp(options: AppOptions = {}) {
     return reply.send({
       status: "ok",
       database: database ? "ok" : "not_configured",
-      version: process.env.npm_package_version ?? "0.6.0"
+      version: process.env.npm_package_version ?? "0.7.0"
     });
   });
 

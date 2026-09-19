@@ -2,25 +2,67 @@
 
 ## Vitrine GitHub Pages
 
-Le workflow `deploy.yml` compile React et publie `dist/web` après chaque push sur `main`. Cette version utilise automatiquement les données de démonstration lorsque l'API n'est pas disponible.
+Le workflow `deploy.yml` compile React et publie `dist/web` après chaque push sur `main`. Cette version utilise les données de démonstration lorsque l’API n’est pas disponible.
 
-## Application full-stack
+## Image full-stack automatisée
 
-Le `Dockerfile` produit un service Node.js unique sur le port `8000` : Fastify expose `/api/*` et sert l'application React compilée. Le health check est `GET /api/health`.
+Chaque push sur `main` publie aussi deux tags sur GitHub Container Registry :
 
-Variables d'environnement :
+- `ghcr.io/cedricpdp/cr.io:latest` ;
+- `ghcr.io/cedricpdp/cr.io:sha-<commit>` pour un déploiement reproductible.
+
+L’image sert l’API et l’application sur le port `8000`. Au démarrage, elle applique les migrations Drizzle si `DATABASE_URL` est définie, puis lance Fastify. Le health check est `GET /api/health`.
+
+Après la première publication, rendre le package `cr.io` public une seule fois dans les réglages GitHub Packages afin que le serveur puisse le télécharger sans identifiants. Tant que ce réglage n’est pas fait, utiliser `docker compose --env-file .env.production up -d --build` pour construire localement depuis le dépôt.
+
+## Premier démarrage avec Docker Compose
+
+Sur un serveur équipé de Docker et du plugin Compose :
+
+```bash
+git clone https://github.com/cedricpdp/cr.io.git
+cd cr.io
+cp .env.production.example .env.production
+```
+
+Générer un secret aléatoire composé de caractères hexadécimaux, puis remplacer la valeur de `POSTGRES_PASSWORD` :
+
+```bash
+openssl rand -hex 32
+```
+
+Démarrer PostgreSQL et cr.io :
+
+```bash
+docker compose --env-file .env.production pull
+docker compose --env-file .env.production up -d
+docker compose --env-file .env.production ps
+```
+
+L’application répond alors sur `http://<serveur>:8000`. Le volume `crio_database` conserve la base entre les mises à jour.
+
+## Mise à jour
+
+```bash
+git pull --ff-only
+docker compose --env-file .env.production pull
+docker compose --env-file .env.production up -d
+```
+
+Les migrations sont rejouables sans danger et s’exécutent avant l’ouverture du serveur HTTP.
+
+## Production publique
+
+Placer un reverse proxy HTTPS devant le port `8000` et ne pas publier le port PostgreSQL. Sauvegarder régulièrement le volume de base. Pour revenir précisément à une version, définir `CRIO_IMAGE` avec un tag `sha-<commit>` dans `.env.production`.
+
+Variables prises en charge par Compose :
 
 | Variable | Requise | Rôle |
 | --- | --- | --- |
-| `PORT` | non | Port HTTP, `8000` dans l'image |
-| `DATABASE_URL` | en production | Connexion PostgreSQL |
+| `POSTGRES_PASSWORD` | oui | Mot de passe interne de PostgreSQL ; utiliser une valeur hexadécimale longue |
+| `CRIO_PORT` | non | Port public, `8000` par défaut |
+| `CRIO_IMAGE` | non | Image à déployer, `ghcr.io/cedricpdp/cr.io:latest` par défaut |
 
-Avant un déploiement full-stack :
+## PWA et hors connexion
 
-1. créer une base PostgreSQL et définir `DATABASE_URL` ;
-2. exécuter `pnpm db:migrate` avec cette variable ;
-3. construire et démarrer l'image ;
-4. vérifier `/api/health`, puis `/` ;
-5. protéger `main` avec le job GitHub Actions `verify`.
-
-Le fournisseur d'hébergement sera choisi avant la mise en production de l'authentification. Il doit accepter une image Docker, des variables secrètes et une connexion PostgreSQL TLS.
+L’installation PWA nécessite HTTPS, sauf sur `localhost`. Le service worker met uniquement en cache le shell statique. Les routes `/api/*` et les données de laboratoire ne sont jamais placées dans son cache. Sans réseau au premier chargement, cr.io affiche donc un écran explicite au lieu de données de démonstration.

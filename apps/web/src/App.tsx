@@ -13,9 +13,10 @@ import {
   type StorageSnapshot
 } from "../../../packages/contracts/src/index.js";
 import { createDemoStorage } from "./demo-storage.js";
+import { isStandaloneApp, isStaticDemoHost, type InstallPromptEvent } from "./pwa.js";
 
 type ThemePreference = "system" | "light" | "dark";
-type AppMode = "loading" | "demo" | "guest" | "authenticated";
+type AppMode = "loading" | "demo" | "guest" | "authenticated" | "offline" | "unavailable";
 type Location = { freezer: Freezer; rack: Rack; box?: StorageBox };
 type SearchResult = Required<Location> & { sample: Sample };
 type View =
@@ -387,6 +388,8 @@ export function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searching, setSearching] = useState(false);
   const [theme, setTheme] = useState<ThemePreference>(getThemePreference);
+  const [online, setOnline] = useState(navigator.onLine);
+  const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent>();
   const searchDialog = useRef<HTMLDialogElement>(null);
   const settingsDialog = useRef<HTMLDialogElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
@@ -441,8 +444,14 @@ export function App() {
         setMode("authenticated");
       } catch {
         if (controller.signal.aborted) return;
-        showStorage(createDemoStorage());
-        setMode("demo");
+        if (!navigator.onLine) {
+          setMode("offline");
+        } else if (isStaticDemoHost(window.location.hostname)) {
+          showStorage(createDemoStorage());
+          setMode("demo");
+        } else {
+          setMode("unavailable");
+        }
       }
     })();
     return () => controller.abort();
@@ -456,6 +465,27 @@ export function App() {
     media.addEventListener("change", onChange);
     return () => media.removeEventListener("change", onChange);
   }, [theme]);
+
+  useEffect(() => {
+    const handleOnline = () => setOnline(true);
+    const handleOffline = () => setOnline(false);
+    const handleInstallPrompt = (event: Event) => {
+      event.preventDefault();
+      setInstallPrompt(event as InstallPromptEvent);
+    };
+    const handleInstalled = () => setInstallPrompt(undefined);
+
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    window.addEventListener("beforeinstallprompt", handleInstallPrompt);
+    window.addEventListener("appinstalled", handleInstalled);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+      window.removeEventListener("beforeinstallprompt", handleInstallPrompt);
+      window.removeEventListener("appinstalled", handleInstalled);
+    };
+  }, []);
 
   const localResults = useMemo<SearchResult[]>(() => {
     if (!snapshot) return [];
@@ -554,6 +584,13 @@ export function App() {
     }
   }
 
+  async function installApp() {
+    if (!installPrompt) return;
+    await installPrompt.prompt();
+    await installPrompt.userChoice;
+    setInstallPrompt(undefined);
+  }
+
   const initials = authSession?.user.displayName.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toLocaleUpperCase("fr") || "CL";
   const editable = mode === "authenticated" && (authSession?.workspace.role === "owner" || authSession?.workspace.role === "admin");
   const currentFreezer = view.level === "freezers" ? undefined : snapshot?.freezers.find((freezer) => freezer.id === view.freezerId);
@@ -564,6 +601,7 @@ export function App() {
     <header className="app-header">
       <button className="brand" type="button" onClick={goHome} aria-label="Accueil cr.io"><span className="brand-mark" aria-hidden="true">cr</span><span>.io</span></button>
       <div className="header-actions">
+        {!online && <span className="connection-status" role="status"><i />Hors connexion</span>}
         {(mode === "authenticated" || mode === "demo") && <button className="icon-button" type="button" onClick={openSearch} aria-label="Rechercher"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m21 21-4.35-4.35m2.35-5.65a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z" /></svg></button>}
         <button className="icon-button" type="button" onClick={() => setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark")} aria-label="Changer de thème"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.9-.1-1.34A7 7 0 0 1 13.34 3.1C12.9 3.04 12.46 3 12 3Z" /></svg></button>
         {mode !== "guest" && <button className="avatar" type="button" onClick={() => settingsDialog.current?.showModal()} aria-label="Ouvrir les réglages">{initials}</button>}
@@ -571,7 +609,9 @@ export function App() {
     </header>
 
     <main id="app" tabIndex={-1}>
-      {mode === "guest" ? <AuthView onAuthenticated={handleAuthenticated} />
+      {mode === "offline" ? <section className="page offline-page"><span className="eyebrow">Mode hors connexion</span><h1>cr.io reste installé.</h1><p className="subtitle">L’interface est disponible, mais vos données de laboratoire ne sont jamais mises en cache sur cet appareil. Reconnectez-vous pour les consulter ou les modifier.</p><button className="primary-button compact" type="button" onClick={() => window.location.reload()}>Réessayer</button></section>
+        : mode === "unavailable" ? <section className="page offline-page"><span className="eyebrow">Service indisponible</span><h1>Vos données restent protégées.</h1><p className="subtitle">cr.io ne parvient pas à joindre son API. Aucune donnée de démonstration ne remplace votre stockage réel. Réessayez quand le service est revenu.</p><button className="primary-button compact" type="button" onClick={() => window.location.reload()}>Réessayer</button></section>
+        : mode === "guest" ? <AuthView onAuthenticated={handleAuthenticated} />
         : !snapshot ? <section className="page"><span className="eyebrow">Connexion</span><h1>Chargement du stockage…</h1></section>
           : view.level === "freezers" ? <FreezersView
               snapshot={snapshot}
@@ -633,8 +673,9 @@ export function App() {
         {authSession && <div className="account-summary"><strong>{authSession.user.displayName}</strong><span>{authSession.user.email}</span><small>{authSession.workspace.name} · {authSession.workspace.role}</small></div>}
         <fieldset className="theme-options"><legend>Thème</legend>{(["system", "light", "dark"] as const).map((value) => <label key={value}><input type="radio" name="theme" value={value} checked={theme === value} onChange={() => setTheme(value)} /><span>{{ system: "Système", light: "Clair", dark: "Sombre" }[value]}</span></label>)}</fieldset>
         {authSession && <a className="secondary-button export-link" href="/api/export/samples.csv" download>Télécharger l’export CSV</a>}
+        {installPrompt && !isStandaloneApp() && <button className="secondary-button" type="button" onClick={() => void installApp()}>Installer cr.io sur cet appareil</button>}
         {authSession && <button className="secondary-button" type="button" onClick={() => void logout()}>Se déconnecter</button>}
-        <div className="about"><strong>cr.io</strong><span>Version 0.6.0 · recherche et export</span></div>
+        <div className="about"><strong>cr.io</strong><span>Version 0.7.0 · application installable</span></div>
       </div>
     </dialog>
   </>;

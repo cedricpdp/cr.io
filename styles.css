@@ -39,13 +39,15 @@
 }
 
 * { box-sizing: border-box; }
-body { margin: 0; min-height: 100vh; background: var(--background); color: var(--text); }
-button, input { font: inherit; }
+body { margin: 0; min-height: 100vh; min-height: 100dvh; background: var(--background); color: var(--text); }
+button, input, select { font: inherit; }
 button { color: inherit; }
 .app-header { height: 72px; display: flex; align-items: center; justify-content: space-between; padding: 0 clamp(18px, 4vw, 52px); background: color-mix(in srgb, var(--surface) 92%, transparent); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 10; backdrop-filter: blur(14px); }
 .brand { display: flex; align-items: center; border: 0; background: transparent; cursor: pointer; font-weight: 800; letter-spacing: -.06em; font-size: 1.4rem; padding: 0; }
 .brand-mark { display: grid; place-items: center; width: 34px; height: 34px; margin-right: 2px; border-radius: 10px; background: var(--accent); color: var(--background); letter-spacing: -.08em; font-size: .95rem; }
 .header-actions { display: flex; align-items: center; gap: 8px; }
+.connection-status { display: inline-flex; align-items: center; gap: 7px; min-height: 34px; padding: 0 11px; border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border)); border-radius: 999px; color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, var(--surface)); font-size: .72rem; font-weight: 750; white-space: nowrap; }
+.connection-status i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .icon-button, .avatar { width: 40px; height: 40px; border: 1px solid transparent; border-radius: 12px; background: transparent; display: grid; place-items: center; cursor: pointer; }
 .icon-button:hover, .avatar:hover { background: var(--surface-hover); border-color: var(--border); }
 .icon-button svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
@@ -153,6 +155,8 @@ h2 { font-size: 1.45rem; letter-spacing: -.035em; margin-bottom: 0; }
 .card-actions .danger-link:hover { color: var(--danger); }
 .empty-state { padding: 50px 24px; border: 1px dashed var(--border); border-radius: var(--radius); background: color-mix(in srgb, var(--surface) 70%, transparent); text-align: center; }
 .empty-state p { margin: 7px 0 0; color: var(--text-muted); }
+.offline-page { min-height: calc(100dvh - 72px); display: flex; flex-direction: column; align-items: flex-start; justify-content: center; }
+.offline-page .subtitle { max-width: 620px; margin-bottom: 22px; }
 .form-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .sample-panel-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-left: auto; }
 .sample-panel-actions button { border: 1px solid var(--border); border-radius: 9px; padding: 8px 10px; background: transparent; color: var(--text-muted); cursor: pointer; font-size: .74rem; font-weight: 700; }
@@ -160,8 +164,8 @@ h2 { font-size: 1.45rem; letter-spacing: -.035em; margin-bottom: 0; }
 .sample-panel-actions .danger-link:hover { border-color: var(--danger); color: var(--danger); }
 
 @media (max-width: 760px) {
-  .app-header { height: 62px; padding-inline: 16px; }
-  .page { width: min(100% - 28px, 620px); padding-top: 30px; }
+  .app-header { height: calc(62px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left)); }
+  .page { width: min(100% - 28px, 620px); padding-top: 30px; padding-bottom: max(80px, env(safe-area-inset-bottom)); }
   .page-head { align-items: flex-start; flex-direction: column; margin-bottom: 22px; }
   h1 { font-size: 2.25rem; }
   .metrics { grid-template-columns: repeat(3, 1fr); }
@@ -175,6 +179,10 @@ h2 { font-size: 1.45rem; letter-spacing: -.035em; margin-bottom: 0; }
   .auth-page { min-height: calc(100vh - 62px); width: min(100% - 28px, 520px); grid-template-columns: 1fr; gap: 30px; padding: 42px 0; }
   .auth-intro h1 { font-size: 2.8rem; }
   .auth-card { padding: 18px; }
+  .connection-status { width: 34px; padding: 0; justify-content: center; font-size: 0; }
+  .connection-status i { width: 8px; height: 8px; }
+  .icon-button, .avatar { min-width: 44px; min-height: 44px; }
+  .offline-page { min-height: calc(100dvh - 62px - env(safe-area-inset-top)); }
 }
 
 @media (prefers-reduced-motion: reduce) {

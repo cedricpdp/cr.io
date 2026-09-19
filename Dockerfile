@@ -18,10 +18,11 @@ ENV PORT=8000
 COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
+COPY --from=build /app/drizzle ./drizzle
 
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD wget -qO- http://127.0.0.1:8000/api/health || exit 1
 
-CMD ["node", "dist/apps/api/src/server.js"]
+CMD ["npm", "run", "start:prod"]

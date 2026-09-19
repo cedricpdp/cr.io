@@ -36,8 +36,9 @@ pnpm db:migrate
 - une box reste toujours un choix explicite ;
 - thème système, clair ou sombre avec préférence locale ;
 - recherche globale et grille de positions responsive ;
+- installation PWA, interface mobile et shell disponible hors connexion ;
 - isolation des données prévue par workspace.
 
 ## État
 
-Version `0.6.0` : recherche PostgreSQL des échantillons et export CSV compatible Excel, en plus de leur cycle de vie complet, du CRUD de la hiérarchie et de l’authentification. Les recherches, exports et mutations sont tous isolés par workspace. GitHub Pages reste la vitrine statique avec données de démonstration ; le Dockerfile est la cible de déploiement full-stack. Voir [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) et [`docs/API.md`](docs/API.md).
+Version `0.7.0` : application installable sur mobile et ordinateur, shell hors connexion sans mise en cache des données de laboratoire, image Docker publiée automatiquement et déploiement Compose prêt à l’emploi. GitHub Pages reste la vitrine statique avec données de démonstration. Voir [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) et [`docs/API.md`](docs/API.md).

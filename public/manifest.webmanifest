@@ -1,0 +1,21 @@
+{
+  "id": "./",
+  "name": "cr.io — Stockage scientifique",
+  "short_name": "cr.io",
+  "description": "Gestion simple et visuelle des échantillons de laboratoire.",
+  "lang": "fr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f4f7fa",
+  "theme_color": "#147d86",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    {
+      "src": "icons/crio.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

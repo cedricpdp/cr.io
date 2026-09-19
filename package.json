@@ -1,6 +1,6 @@
 {
   "name": "crio",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.19.0",
@@ -16,6 +16,7 @@
     "build:web": "vite build",
     "build:api": "tsc -p apps/api/tsconfig.json",
     "start": "node dist/apps/api/src/server.js",
+    "start:prod": "node dist/apps/api/src/migrate.js && node dist/apps/api/src/server.js",
     "lint": "eslint apps packages vite.config.ts vitest.config.ts drizzle.config.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
