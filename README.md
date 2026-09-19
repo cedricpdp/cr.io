@@ -40,4 +40,4 @@ pnpm db:migrate
 
 ## État
 
-Version `0.4.0` : CRUD complet des freezers, racks et boxes, navigation adaptative sur une hiérarchie vide ou multiple, et isolation systématique des opérations par workspace. GitHub Pages reste la vitrine statique avec données de démonstration ; le Dockerfile est la cible de déploiement full-stack. Voir [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) et [`docs/API.md`](docs/API.md).
+Version `0.5.0` : gestion complète des échantillons — création, modification, déplacement atomique et suppression — en plus du CRUD freezer/rack/box et de l’authentification. Les positions et identifiants sont uniques par périmètre, toutes les opérations sont isolées par workspace. GitHub Pages reste la vitrine statique avec données de démonstration ; le Dockerfile est la cible de déploiement full-stack. Voir [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) et [`docs/API.md`](docs/API.md).

@@ -1,20 +1,24 @@
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
 import { ZodError, type ZodType } from "zod";
 import {
+  boxIdParamsSchema,
   createBoxSchema,
   createFreezerSchema,
   createRackSchema,
+  createSampleSchema,
   entityIdParamsSchema,
   freezerIdParamsSchema,
+  moveSampleSchema,
   rackIdParamsSchema,
   updateBoxSchema,
   updateFreezerSchema,
-  updateRackSchema
+  updateRackSchema,
+  updateSampleSchema
 } from "../../../../packages/contracts/src/index.js";
 import { SESSION_COOKIE } from "../auth/routes.js";
 import type { AuthService } from "../auth/service.js";
 import { createDemoStorage } from "../demo-storage.js";
-import { StorageConflictError } from "./errors.js";
+import { StorageConflictError, StoragePositionError } from "./errors.js";
 import type { StorageRepository } from "./repository.js";
 
 export interface StorageRoutesOptions {
@@ -57,7 +61,8 @@ async function mutation(reply: FastifyReply, operation: () => Promise<string | b
     if (typeof result === "string") return reply.code(201).send({ id: result });
     return reply.code(204).send();
   } catch (error) {
-    if (error instanceof StorageConflictError) return reply.code(409).send({ error: "conflict", message: "Ce nom ou cette position est déjà utilisé." });
+    if (error instanceof StorageConflictError) return reply.code(409).send({ error: "conflict", message: "Ce nom, cet identifiant ou cette position est déjà utilisé." });
+    if (error instanceof StoragePositionError) return reply.code(400).send({ error: "invalid_position", message: "La position est incompatible avec les dimensions de la box." });
     throw error;
   }
 }
@@ -160,5 +165,47 @@ export const storageRoutes: FastifyPluginAsync<StorageRoutesOptions> = async (ap
     const params = parse(entityIdParamsSchema, request.params, reply);
     if (!params) return;
     return mutation(reply, () => options.repository!.deleteBox(workspace.id, params.id));
+  });
+
+  app.post("/boxes/:boxId/samples", async (request, reply) => {
+    if (!options.repository || !options.authService) return unavailable(reply);
+    const workspace = await workspaceFor(request, reply, options.authService);
+    if (!workspace) return;
+    const params = parse(boxIdParamsSchema, request.params, reply);
+    if (!params) return;
+    const input = parse(createSampleSchema, request.body, reply);
+    if (!input) return;
+    return mutation(reply, () => options.repository!.createSample(workspace.id, params.boxId, input));
+  });
+
+  app.patch("/samples/:id", async (request, reply) => {
+    if (!options.repository || !options.authService) return unavailable(reply);
+    const workspace = await workspaceFor(request, reply, options.authService);
+    if (!workspace) return;
+    const params = parse(entityIdParamsSchema, request.params, reply);
+    if (!params) return;
+    const input = parse(updateSampleSchema, request.body, reply);
+    if (!input) return;
+    return mutation(reply, () => options.repository!.updateSample(workspace.id, params.id, input));
+  });
+
+  app.post("/samples/:id/move", async (request, reply) => {
+    if (!options.repository || !options.authService) return unavailable(reply);
+    const workspace = await workspaceFor(request, reply, options.authService);
+    if (!workspace) return;
+    const params = parse(entityIdParamsSchema, request.params, reply);
+    if (!params) return;
+    const input = parse(moveSampleSchema, request.body, reply);
+    if (!input) return;
+    return mutation(reply, () => options.repository!.moveSample(workspace.id, params.id, input));
+  });
+
+  app.delete("/samples/:id", async (request, reply) => {
+    if (!options.repository || !options.authService) return unavailable(reply);
+    const workspace = await workspaceFor(request, reply, options.authService);
+    if (!workspace) return;
+    const params = parse(entityIdParamsSchema, request.params, reply);
+    if (!params) return;
+    return mutation(reply, () => options.repository!.deleteSample(workspace.id, params.id));
   });
 };

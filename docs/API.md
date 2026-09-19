@@ -14,5 +14,11 @@ Toutes les routes métier exigent le cookie de session `crio_session`. Le worksp
 | `POST` | `/api/racks/:rackId/boxes` | Créer une box |
 | `PATCH` | `/api/boxes/:id` | Modifier une box |
 | `DELETE` | `/api/boxes/:id` | Supprimer une box et son contenu |
+| `POST` | `/api/boxes/:boxId/samples` | Créer un échantillon à une position |
+| `PATCH` | `/api/samples/:id` | Modifier les informations d’un échantillon |
+| `POST` | `/api/samples/:id/move` | Déplacer un échantillon vers une box et une position |
+| `DELETE` | `/api/samples/:id` | Supprimer un échantillon |
 
 Les créations répondent `201`, les modifications et suppressions `204`. Les identifiants inconnus ou hors workspace répondent tous `404`, sans révéler l'existence d'une ressource appartenant à un autre workspace.
+
+La position d’un échantillon est un entier commençant à `1`, converti côté serveur en ligne et colonne selon les dimensions de la box. Un déplacement met à jour la box et les coordonnées dans une seule requête ; la contrainte PostgreSQL interdit toute double occupation.

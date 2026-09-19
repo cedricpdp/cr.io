@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveLandingLevel, storageSnapshotSchema, type StorageSnapshot } from "./storage.js";
+import { createSampleSchema, moveSampleSchema, resolveLandingLevel, storageSnapshotSchema, type StorageSnapshot } from "./storage.js";
 
 function snapshot(freezerCount: number, rackCount: number): StorageSnapshot {
   return {
@@ -32,5 +32,18 @@ describe("resolveLandingLevel", () => {
 
   it("validates a complete snapshot contract", () => {
     expect(storageSnapshotSchema.parse(snapshot(1, 1)).workspace.name).toBe("Lab");
+  });
+});
+
+describe("sample mutations", () => {
+  it("accepts a complete sample and rejects position zero", () => {
+    const input = { externalId: "CR-001", name: "Plasma", project: "OncoMap", storedAt: "2026-09-19", position: 1 };
+    expect(createSampleSchema.parse(input).position).toBe(1);
+    expect(createSampleSchema.safeParse({ ...input, position: 0 }).success).toBe(false);
+  });
+
+  it("requires a UUID target box for a move", () => {
+    expect(moveSampleSchema.safeParse({ boxId: "box-1", position: 1 }).success).toBe(false);
+    expect(moveSampleSchema.safeParse({ boxId: "00000000-0000-4000-8000-000000000030", position: 1 }).success).toBe(true);
   });
 });

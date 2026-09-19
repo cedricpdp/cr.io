@@ -3,10 +3,13 @@ import type {
   CreateBox,
   CreateFreezer,
   CreateRack,
+  CreateSample,
+  MoveSample,
   StorageSnapshot,
   UpdateBox,
   UpdateFreezer,
-  UpdateRack
+  UpdateRack,
+  UpdateSample
 } from "../../../../packages/contracts/src/index.js";
 import { MemoryAuthRepository } from "../../test/memory-auth.js";
 import { buildApp } from "../app.js";
@@ -18,6 +21,7 @@ const WORKSPACE_ID = "00000000-0000-4000-8000-000000000002";
 const FREEZER_ID = "00000000-0000-4000-8000-000000000010";
 const RACK_ID = "00000000-0000-4000-8000-000000000020";
 const BOX_ID = "00000000-0000-4000-8000-000000000030";
+const SAMPLE_ID = "00000000-0000-4000-8000-000000000040";
 
 class MemoryStorageRepository implements StorageRepository {
   readonly workspaceCalls: string[] = [];
@@ -73,6 +77,26 @@ class MemoryStorageRepository implements StorageRepository {
     return true;
   }
 
+  async createSample(workspaceId: string, _boxId: string, _input: CreateSample) {
+    this.record(workspaceId);
+    return SAMPLE_ID;
+  }
+
+  async updateSample(workspaceId: string, _id: string, _input: UpdateSample) {
+    this.record(workspaceId);
+    return true;
+  }
+
+  async moveSample(workspaceId: string, _id: string, _input: MoveSample) {
+    this.record(workspaceId);
+    return true;
+  }
+
+  async deleteSample(workspaceId: string, _id: string) {
+    this.record(workspaceId);
+    return true;
+  }
+
   private record(workspaceId: string) {
     if (this.conflict) throw new StorageConflictError();
     this.workspaceCalls.push(workspaceId);
@@ -118,6 +142,22 @@ describe("workspace storage routes", () => {
       { method: "DELETE", url: `/api/boxes/${BOX_ID}`, status: 204 },
       { method: "DELETE", url: `/api/racks/${RACK_ID}`, status: 204 },
       { method: "DELETE", url: `/api/freezers/${FREEZER_ID}`, status: 204 }
+    ] as const;
+
+    for (const request of requests) {
+      const response = await app.inject({ ...request, headers: { cookie } });
+      expect(response.statusCode, `${request.method} ${request.url}`).toBe(request.status);
+    }
+    expect(repository.workspaceCalls).toEqual(Array.from({ length: requests.length }, () => WORKSPACE_ID));
+  });
+
+  it("creates, edits, moves and deletes samples within the same workspace", async () => {
+    const { app, repository, cookie } = await authenticatedApp();
+    const requests = [
+      { method: "POST", url: `/api/boxes/${BOX_ID}/samples`, payload: { externalId: "CR-001", name: "Plasma 1", project: "OncoMap", storedAt: "2026-09-19", position: 1 }, status: 201 },
+      { method: "PATCH", url: `/api/samples/${SAMPLE_ID}`, payload: { name: "Plasma témoin" }, status: 204 },
+      { method: "POST", url: `/api/samples/${SAMPLE_ID}/move`, payload: { boxId: BOX_ID, position: 64 }, status: 204 },
+      { method: "DELETE", url: `/api/samples/${SAMPLE_ID}`, status: 204 }
     ] as const;
 
     for (const request of requests) {

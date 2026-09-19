@@ -1,12 +1,15 @@
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, gt, or, sql } from "drizzle-orm";
 import type {
   CreateBox,
   CreateFreezer,
   CreateRack,
+  CreateSample,
+  MoveSample,
   StorageSnapshot,
   UpdateBox,
   UpdateFreezer,
-  UpdateRack
+  UpdateRack,
+  UpdateSample
 } from "../../../../packages/contracts/src/index.js";
 import {
   boxes,
@@ -15,7 +18,7 @@ import {
   samples,
   type Database
 } from "../../../../packages/db/src/index.js";
-import { StorageConflictError } from "./errors.js";
+import { StorageConflictError, StoragePositionError } from "./errors.js";
 
 type DrizzleDatabase = Database["db"];
 
@@ -30,6 +33,10 @@ export interface StorageRepository {
   createBox(workspaceId: string, rackId: string, input: CreateBox): Promise<string | undefined>;
   updateBox(workspaceId: string, id: string, input: UpdateBox): Promise<boolean>;
   deleteBox(workspaceId: string, id: string): Promise<boolean>;
+  createSample(workspaceId: string, boxId: string, input: CreateSample): Promise<string | undefined>;
+  updateSample(workspaceId: string, id: string, input: UpdateSample): Promise<boolean>;
+  moveSample(workspaceId: string, id: string, input: MoveSample): Promise<boolean>;
+  deleteSample(workspaceId: string, id: string): Promise<boolean>;
 }
 
 function isUniqueViolation(error: unknown) {
@@ -52,6 +59,7 @@ export class DrizzleStorageRepository implements StorageRepository {
       .orderBy(asc(boxes.position));
     const sampleRows = await this.database.select({
       boxId: samples.boxId,
+      recordId: samples.id,
       id: samples.externalId,
       name: samples.name,
       project: samples.project,
@@ -85,6 +93,7 @@ export class DrizzleStorageRepository implements StorageRepository {
     }
     for (const sample of sampleRows) {
       boxMap.get(sample.boxId)?.samples.push({
+        recordId: sample.recordId,
         id: sample.id,
         name: sample.name,
         project: sample.project,
@@ -150,7 +159,15 @@ export class DrizzleStorageRepository implements StorageRepository {
   }
 
   async updateBox(workspaceId: string, id: string, input: UpdateBox) {
-    if (!await this.ownsBox(workspaceId, id)) return false;
+    const currentBox = await this.getOwnedBox(workspaceId, id);
+    if (!currentBox) return false;
+    const targetRows = input.rows ?? currentBox.rows;
+    const targetColumns = input.columns ?? currentBox.columns;
+    if (input.rows !== undefined || input.columns !== undefined) {
+      const outside = await this.database.select({ id: samples.id }).from(samples)
+        .where(and(eq(samples.boxId, id), or(gt(samples.row, targetRows), gt(samples.column, targetColumns)))).limit(1);
+      if (outside.length) throw new StoragePositionError();
+    }
     return this.withConflictHandling(async () => {
       const rows = await this.database.update(boxes).set({ ...input, updatedAt: new Date() }).where(eq(boxes.id, id)).returning({ id: boxes.id });
       return rows.length === 1;
@@ -160,6 +177,56 @@ export class DrizzleStorageRepository implements StorageRepository {
   async deleteBox(workspaceId: string, id: string) {
     if (!await this.ownsBox(workspaceId, id)) return false;
     const rows = await this.database.delete(boxes).where(eq(boxes.id, id)).returning({ id: boxes.id });
+    return rows.length === 1;
+  }
+
+  async createSample(workspaceId: string, boxId: string, input: CreateSample) {
+    const targetBox = await this.getOwnedBox(workspaceId, boxId);
+    if (!targetBox) return undefined;
+    const coordinates = this.coordinates(input.position, targetBox.rows, targetBox.columns);
+    return this.withConflictHandling(async () => {
+      const [created] = await this.database.insert(samples).values({
+        workspaceId,
+        boxId,
+        externalId: input.externalId,
+        name: input.name,
+        project: input.project,
+        storedAt: new Date(`${input.storedAt}T00:00:00.000Z`),
+        ...coordinates
+      }).returning({ id: samples.id });
+      return created?.id;
+    });
+  }
+
+  async updateSample(workspaceId: string, id: string, input: UpdateSample) {
+    const values = {
+      ...(input.externalId === undefined ? {} : { externalId: input.externalId }),
+      ...(input.name === undefined ? {} : { name: input.name }),
+      ...(input.project === undefined ? {} : { project: input.project }),
+      ...(input.storedAt === undefined ? {} : { storedAt: new Date(`${input.storedAt}T00:00:00.000Z`) }),
+      updatedAt: new Date()
+    };
+    return this.withConflictHandling(async () => {
+      const rows = await this.database.update(samples).set(values)
+        .where(and(eq(samples.id, id), eq(samples.workspaceId, workspaceId))).returning({ id: samples.id });
+      return rows.length === 1;
+    });
+  }
+
+  async moveSample(workspaceId: string, id: string, input: MoveSample) {
+    if (!await this.ownsSample(workspaceId, id)) return false;
+    const targetBox = await this.getOwnedBox(workspaceId, input.boxId);
+    if (!targetBox) return false;
+    const coordinates = this.coordinates(input.position, targetBox.rows, targetBox.columns);
+    return this.withConflictHandling(async () => {
+      const rows = await this.database.update(samples).set({ boxId: input.boxId, ...coordinates, updatedAt: new Date() })
+        .where(and(eq(samples.id, id), eq(samples.workspaceId, workspaceId))).returning({ id: samples.id });
+      return rows.length === 1;
+    });
+  }
+
+  async deleteSample(workspaceId: string, id: string) {
+    const rows = await this.database.delete(samples).where(and(eq(samples.id, id), eq(samples.workspaceId, workspaceId))).returning({ id: samples.id });
     return rows.length === 1;
   }
 
@@ -181,6 +248,25 @@ export class DrizzleStorageRepository implements StorageRepository {
       .innerJoin(freezers, eq(freezers.id, racks.freezerId))
       .where(and(eq(boxes.id, id), eq(freezers.workspaceId, workspaceId))).limit(1);
     return rows.length === 1;
+  }
+
+  private async ownsSample(workspaceId: string, id: string) {
+    const rows = await this.database.select({ id: samples.id }).from(samples)
+      .where(and(eq(samples.id, id), eq(samples.workspaceId, workspaceId))).limit(1);
+    return rows.length === 1;
+  }
+
+  private async getOwnedBox(workspaceId: string, id: string) {
+    const [result] = await this.database.select({ id: boxes.id, rows: boxes.rows, columns: boxes.columns }).from(boxes)
+      .innerJoin(racks, eq(racks.id, boxes.rackId))
+      .innerJoin(freezers, eq(freezers.id, racks.freezerId))
+      .where(and(eq(boxes.id, id), eq(freezers.workspaceId, workspaceId))).limit(1);
+    return result;
+  }
+
+  private coordinates(position: number, rows: number, columns: number) {
+    if (position > rows * columns) throw new StoragePositionError();
+    return { row: Math.floor((position - 1) / columns) + 1, column: ((position - 1) % columns) + 1 };
   }
 
   private async nextRackPosition(freezerId: string) {

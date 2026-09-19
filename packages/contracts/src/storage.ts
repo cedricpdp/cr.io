@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const sampleSchema = z.object({
+  recordId: z.uuid().optional(),
   id: z.string().min(1),
   name: z.string().min(1),
   project: z.string().min(1),
@@ -83,6 +84,28 @@ export const rackIdParamsSchema = z.object({ rackId: z.uuid() });
 
 export const mutationResultSchema = z.object({ id: z.uuid() });
 
+export const createSampleSchema = z.object({
+  externalId: z.string().trim().min(1).max(120),
+  name: z.string().trim().min(1).max(160),
+  project: z.string().trim().min(1).max(160),
+  storedAt: z.iso.date(),
+  position: positionSchema
+});
+
+export const updateSampleSchema = z.object({
+  externalId: z.string().trim().min(1).max(120).optional(),
+  name: z.string().trim().min(1).max(160).optional(),
+  project: z.string().trim().min(1).max(160).optional(),
+  storedAt: z.iso.date().optional()
+}).refine((value) => Object.keys(value).length > 0, "Au moins un champ est requis.");
+
+export const moveSampleSchema = z.object({
+  boxId: z.uuid(),
+  position: positionSchema
+});
+
+export const boxIdParamsSchema = z.object({ boxId: z.uuid() });
+
 export type Sample = z.infer<typeof sampleSchema>;
 export type StorageBox = z.infer<typeof boxSchema>;
 export type Rack = z.infer<typeof rackSchema>;
@@ -95,6 +118,9 @@ export type CreateRack = z.infer<typeof createRackSchema>;
 export type UpdateRack = z.infer<typeof updateRackSchema>;
 export type CreateBox = z.infer<typeof createBoxSchema>;
 export type UpdateBox = z.infer<typeof updateBoxSchema>;
+export type CreateSample = z.infer<typeof createSampleSchema>;
+export type UpdateSample = z.infer<typeof updateSampleSchema>;
+export type MoveSample = z.infer<typeof moveSampleSchema>;
 
 export type LandingLevel =
   | { level: "freezers" }

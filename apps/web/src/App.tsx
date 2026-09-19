@@ -26,6 +26,10 @@ type EditorState =
   | { kind: "freezer"; entity?: Freezer }
   | { kind: "rack"; freezer: Freezer; entity?: Rack }
   | { kind: "box"; freezer: Freezer; rack: Rack; entity?: StorageBox };
+type SampleEditorState =
+  | { mode: "create"; box: StorageBox; position: number }
+  | { mode: "edit"; box: StorageBox; sample: Sample }
+  | { mode: "move"; box: StorageBox; sample: Sample };
 
 function getThemePreference(): ThemePreference {
   const value = localStorage.getItem("crio-theme");
@@ -187,11 +191,12 @@ function BoxesView({ snapshot, freezer, rack, editable, onBack, onCreate, onOpen
   </section>;
 }
 
-function BoxView({ location, selectedPosition, onBack, onSelect }: { location: Required<Location>; selectedPosition: number | null; onBack: () => void; onSelect: (position: number) => void }) {
+function BoxView({ location, selectedPosition, editable, onBack, onSelect, onCreate, onEdit, onMove, onDelete }: { location: Required<Location>; selectedPosition: number | null; editable: boolean; onBack: () => void; onSelect: (position: number) => void; onCreate: (position: number) => void; onEdit: (sample: Sample) => void; onMove: (sample: Sample) => void; onDelete: (sample: Sample) => void }) {
   const { freezer, rack, box } = location;
   const capacity = box.rows * box.columns;
   const samplesByPosition = new Map(box.samples.map((sample) => [sample.position, sample]));
   const selectedSample = selectedPosition ? samplesByPosition.get(selectedPosition) : undefined;
+  const firstFreePosition = Array.from({ length: capacity }, (_, index) => index + 1).find((position) => !samplesByPosition.has(position));
 
   return <section className="page">
     <button className="back" type="button" onClick={onBack}>‹ Boxes</button>
@@ -203,6 +208,7 @@ function BoxView({ location, selectedPosition, onBack, onSelect }: { location: R
       </div>
       <div className="context">{box.samples.length} occupées · {capacity - box.samples.length} libres</div>
     </div>
+    {editable && firstFreePosition && <div className="page-actions"><button className="primary-button compact" type="button" onClick={() => onCreate(firstFreePosition)}>Ajouter un échantillon</button></div>}
     <div className="sample-grid-wrap">
       <div className="sample-grid" style={{ gridTemplateColumns: `34px repeat(${box.columns}, minmax(60px, 1fr))` }}>
         <span />
@@ -231,11 +237,11 @@ function BoxView({ location, selectedPosition, onBack, onSelect }: { location: R
     <div className="legend"><span><i />Libre</span><span><i className="occupied" />Occupée</span><span><i className="selected" />Sélectionnée</span></div>
     {selectedPosition && <div className="sample-panel">
       <div><span className="eyebrow">{selectedSample ? positionLabel(selectedPosition, box.columns) : "Position libre"}</span><h2>{selectedSample?.name ?? "Emplacement disponible"}</h2></div>
-      {selectedSample ? <dl>
+      {selectedSample ? <><dl>
         <div><dt>Identifiant</dt><dd>{selectedSample.id}</dd></div>
         <div><dt>Projet</dt><dd>{selectedSample.project}</dd></div>
         <div><dt>Stocké le</dt><dd>{new Date(`${selectedSample.date}T00:00:00`).toLocaleDateString("fr-FR")}</dd></div>
-      </dl> : <span className="pill">{positionLabel(selectedPosition, box.columns)}</span>}
+      </dl>{editable && selectedSample.recordId && <div className="sample-panel-actions"><button type="button" onClick={() => onEdit(selectedSample)}>Modifier</button><button type="button" onClick={() => onMove(selectedSample)}>Déplacer</button><button className="danger-link" type="button" onClick={() => onDelete(selectedSample)}>Supprimer</button></div>}</> : <div className="sample-panel-actions"><span className="pill">{positionLabel(selectedPosition, box.columns)}</span>{editable && <button type="button" onClick={() => onCreate(selectedPosition)}>Ajouter ici</button>}</div>}
     </div>}
   </section>;
 }
@@ -299,12 +305,81 @@ function EntityEditor({ state, onClose, onSaved }: { state: EditorState; onClose
   </dialog>;
 }
 
+function SampleEditor({ state, snapshot, onClose, onSaved }: { state: SampleEditorState; snapshot: StorageSnapshot; onClose: () => void; onSaved: (boxId: string, position: number) => Promise<void> }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const sample = state.mode === "create" ? undefined : state.sample;
+  const [targetBoxId, setTargetBoxId] = useState(state.box.id);
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const boxes = snapshot.freezers.flatMap((freezer) => freezer.racks.flatMap((rack) => rack.boxes.map((box) => ({ freezer, rack, box }))));
+  const targetBox = boxes.find((item) => item.box.id === targetBoxId)?.box ?? state.box;
+
+  useEffect(() => { dialog.current?.showModal(); }, []);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSubmitting(true);
+    setError("");
+    const values = new FormData(event.currentTarget);
+    const position = state.mode === "create" ? state.position : state.mode === "move" ? Number(values.get("position")) : state.sample.position;
+    const boxId = state.mode === "move" ? String(values.get("boxId")) : state.box.id;
+    const payload = state.mode === "move"
+      ? { boxId, position }
+      : {
+          externalId: values.get("externalId"),
+          name: values.get("name"),
+          project: values.get("project"),
+          storedAt: values.get("storedAt"),
+          ...(state.mode === "create" ? { position } : {})
+        };
+    const endpoint = state.mode === "create" ? `/api/boxes/${state.box.id}/samples` : state.mode === "move" ? `/api/samples/${state.sample.recordId}/move` : `/api/samples/${state.sample.recordId}`;
+    const method = state.mode === "edit" ? "PATCH" : "POST";
+
+    try {
+      const response = await fetch(endpoint, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
+      if (!response.ok) {
+        const body: unknown = await response.json();
+        const message = typeof body === "object" && body !== null && "message" in body ? String(body.message) : "Enregistrement impossible.";
+        throw new Error(message);
+      }
+      dialog.current?.close();
+      await onSaved(boxId, position);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Une erreur est survenue.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const title = state.mode === "create" ? `Ajouter en ${positionLabel(state.position, state.box.columns)}` : state.mode === "move" ? "Déplacer l’échantillon" : "Modifier l’échantillon";
+  return <dialog ref={dialog} className="dialog sample-dialog" onClose={onClose}>
+    <div className="dialog-shell">
+      <div className="dialog-head"><div><span className="eyebrow">{state.box.name}</span><h2>{title}</h2></div><button className="icon-button" type="button" onClick={() => dialog.current?.close()} aria-label="Fermer">×</button></div>
+      <form className="auth-form" onSubmit={(event) => void submit(event)}>
+        {state.mode === "move" ? <>
+          <label>Box<select name="boxId" value={targetBoxId} onChange={(event) => setTargetBoxId(event.target.value)}>{boxes.map(({ freezer, rack, box }) => <option key={box.id} value={box.id}>{freezer.name} · {rack.name} · {box.name}</option>)}</select></label>
+          <label>Position<input name="position" type="number" min={1} max={targetBox.rows * targetBox.columns} required defaultValue={sample?.position ?? 1} /></label>
+          <small>Positions 1 à {targetBox.rows * targetBox.columns} pour une grille {targetBox.rows} × {targetBox.columns}.</small>
+        </> : <>
+          <label>Identifiant<input name="externalId" required maxLength={120} defaultValue={sample?.id ?? ""} autoFocus /></label>
+          <label>Nom<input name="name" required maxLength={160} defaultValue={sample?.name ?? ""} /></label>
+          <label>Projet<input name="project" required maxLength={160} defaultValue={sample?.project ?? ""} /></label>
+          <label>Date de stockage<input name="storedAt" type="date" required defaultValue={sample?.date ?? new Date().toISOString().slice(0, 10)} /></label>
+        </>}
+        {error && <div className="form-error" role="alert">{error}</div>}
+        <button className="primary-button" type="submit" disabled={submitting}>{submitting ? "Enregistrement…" : state.mode === "move" ? "Déplacer" : "Enregistrer"}</button>
+      </form>
+    </div>
+  </dialog>;
+}
+
 export function App() {
   const [mode, setMode] = useState<AppMode>("loading");
   const [authSession, setAuthSession] = useState<AuthSession>();
   const [snapshot, setSnapshot] = useState<StorageSnapshot>();
   const [view, setView] = useState<View>({ level: "freezers" });
   const [editor, setEditor] = useState<EditorState>();
+  const [sampleEditor, setSampleEditor] = useState<SampleEditorState>();
   const [selectedPosition, setSelectedPosition] = useState<number | null>(null);
   const [query, setQuery] = useState("");
   const [theme, setTheme] = useState<ThemePreference>(getThemePreference);
@@ -317,10 +392,24 @@ export function App() {
     setView(landingView(data));
   }
 
-  async function loadStorage() {
+  async function loadStorage(target?: { boxId: string; position: number | null }) {
     const response = await fetch("/api/storage");
     if (!response.ok) throw new Error(`API ${response.status}`);
-    showStorage(storageSnapshotSchema.parse(await response.json()));
+    const data = storageSnapshotSchema.parse(await response.json());
+    if (!target) {
+      showStorage(data);
+      return;
+    }
+    for (const freezer of data.freezers) for (const rack of freezer.racks) {
+      const box = rack.boxes.find((item) => item.id === target.boxId);
+      if (box) {
+        setSnapshot(data);
+        setView({ level: "box", freezerId: freezer.id, rackId: rack.id, boxId: box.id });
+        setSelectedPosition(target.position);
+        return;
+      }
+    }
+    showStorage(data);
   }
 
   useEffect(() => {
@@ -402,6 +491,17 @@ export function App() {
     await loadStorage();
   }
 
+  async function removeSample(sample: Sample, box: StorageBox) {
+    if (!sample.recordId || !window.confirm(`Supprimer l’échantillon « ${sample.name} » ?`)) return;
+    const response = await fetch(`/api/samples/${sample.recordId}`, { method: "DELETE" });
+    if (!response.ok) {
+      const body: unknown = await response.json();
+      window.alert(typeof body === "object" && body !== null && "message" in body ? String(body.message) : "Suppression impossible.");
+      return;
+    }
+    await loadStorage({ boxId: box.id, position: sample.position });
+  }
+
   async function handleAuthenticated(session: AuthSession) {
     setAuthSession(session);
     await loadStorage();
@@ -471,13 +571,19 @@ export function App() {
                 : view.level === "box" && currentFreezer && currentRack && currentBox ? <BoxView
                     location={{ freezer: currentFreezer, rack: currentRack, box: currentBox }}
                     selectedPosition={selectedPosition}
+                    editable={editable}
                     onBack={() => { setView({ level: "boxes", freezerId: currentFreezer.id, rackId: currentRack.id }); setSelectedPosition(null); }}
                     onSelect={setSelectedPosition}
+                    onCreate={(position) => setSampleEditor({ mode: "create", box: currentBox, position })}
+                    onEdit={(sample) => setSampleEditor({ mode: "edit", box: currentBox, sample })}
+                    onMove={(sample) => setSampleEditor({ mode: "move", box: currentBox, sample })}
+                    onDelete={(sample) => void removeSample(sample, currentBox)}
                   />
                   : <section className="page"><span className="eyebrow">Navigation</span><h1>Élément introuvable.</h1><button className="primary-button compact" type="button" onClick={goHome}>Revenir à l’accueil</button></section>}
     </main>
 
     {editor && <EntityEditor state={editor} onClose={() => setEditor(undefined)} onSaved={async () => { setEditor(undefined); await loadStorage(); }} />}
+    {sampleEditor && snapshot && <SampleEditor state={sampleEditor} snapshot={snapshot} onClose={() => setSampleEditor(undefined)} onSaved={async (boxId, position) => { setSampleEditor(undefined); await loadStorage({ boxId, position }); }} />}
 
     <dialog ref={searchDialog} className="dialog search-dialog">
       <div className="dialog-shell">
@@ -493,7 +599,7 @@ export function App() {
         {authSession && <div className="account-summary"><strong>{authSession.user.displayName}</strong><span>{authSession.user.email}</span><small>{authSession.workspace.name} · {authSession.workspace.role}</small></div>}
         <fieldset className="theme-options"><legend>Thème</legend>{(["system", "light", "dark"] as const).map((value) => <label key={value}><input type="radio" name="theme" value={value} checked={theme === value} onChange={() => setTheme(value)} /><span>{{ system: "Système", light: "Clair", dark: "Sombre" }[value]}</span></label>)}</fieldset>
         {authSession && <button className="secondary-button" type="button" onClick={() => void logout()}>Se déconnecter</button>}
-        <div className="about"><strong>cr.io</strong><span>Version 0.4.0 · stockage</span></div>
+        <div className="about"><strong>cr.io</strong><span>Version 0.5.0 · échantillons</span></div>
       </div>
     </dialog>
   </>;
