@@ -23,6 +23,6 @@ COPY --from=build /app/drizzle ./drizzle
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:8000/api/health || exit 1
+  CMD wget -qO- "http://127.0.0.1:${PORT:-8000}/api/live" || exit 1
 
 CMD ["npm", "run", "start:prod"]

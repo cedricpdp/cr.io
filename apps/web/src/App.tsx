@@ -675,7 +675,7 @@ export function App() {
         {authSession && <a className="secondary-button export-link" href="/api/export/samples.csv" download>Télécharger l’export CSV</a>}
         {installPrompt && !isStandaloneApp() && <button className="secondary-button" type="button" onClick={() => void installApp()}>Installer cr.io sur cet appareil</button>}
         {authSession && <button className="secondary-button" type="button" onClick={() => void logout()}>Se déconnecter</button>}
-        <div className="about"><strong>cr.io</strong><span>Version 0.7.0 · application installable</span></div>
+        <div className="about"><strong>cr.io</strong><span>Version 0.7.1 · hébergement gratuit prêt</span></div>
       </div>
     </dialog>
   </>;

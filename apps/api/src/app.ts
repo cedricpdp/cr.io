@@ -36,12 +36,17 @@ export async function buildApp(options: AppOptions = {}) {
   await app.register(authRoutes, { prefix: "/api/auth", service: authService });
   await app.register(storageRoutes, { prefix: "/api", authService, repository: storageRepository });
 
+  app.get("/api/live", async (_request, reply) => reply.send({
+    status: "ok",
+    version: process.env.npm_package_version ?? "0.7.1"
+  }));
+
   app.get("/api/health", async (_request, reply) => {
     if (database) await database.ping();
     return reply.send({
       status: "ok",
       database: database ? "ok" : "not_configured",
-      version: process.env.npm_package_version ?? "0.7.0"
+      version: process.env.npm_package_version ?? "0.7.1"
     });
   });
 

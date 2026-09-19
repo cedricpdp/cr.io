@@ -4,6 +4,8 @@ Toutes les routes métier exigent le cookie de session `crio_session`. Le worksp
 
 | Méthode | Route | Fonction |
 | --- | --- | --- |
+| `GET` | `/api/live` | Vérifier le processus sans solliciter PostgreSQL |
+| `GET` | `/api/health` | Vérifier l’API et la connexion PostgreSQL |
 | `GET` | `/api/storage` | Hiérarchie complète du workspace |
 | `GET` | `/api/search?q=…&limit=…` | Rechercher des échantillons, maximum 50 résultats |
 | `GET` | `/api/export/samples.csv` | Exporter les échantillons du workspace |

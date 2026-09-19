@@ -11,7 +11,7 @@ Chaque push sur `main` publie aussi deux tags sur GitHub Container Registry :
 - `ghcr.io/cedricpdp/cr.io:latest` ;
 - `ghcr.io/cedricpdp/cr.io:sha-<commit>` pour un déploiement reproductible.
 
-L’image sert l’API et l’application sur le port `8000`. Au démarrage, elle applique les migrations Drizzle si `DATABASE_URL` est définie, puis lance Fastify. Le health check est `GET /api/health`.
+L’image sert l’API et l’application sur le port `8000`. Au démarrage, elle applique les migrations Drizzle si `DATABASE_URL` est définie, puis lance Fastify. Le contrôle de vie est `GET /api/live` ; `GET /api/health` vérifie également PostgreSQL.
 
 Après la première publication, rendre le package `cr.io` public une seule fois dans les réglages GitHub Packages afin que le serveur puisse le télécharger sans identifiants. Tant que ce réglage n’est pas fait, utiliser `docker compose --env-file .env.production up -d --build` pour construire localement depuis le dépôt.
 
